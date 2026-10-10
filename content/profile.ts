@@ -38,6 +38,7 @@ export type Education = {
   school: Copy;
   detail: Copy;
   crest: string;
+  href: string;
 };
 
 export type PostImage = {
@@ -176,6 +177,7 @@ export const profile = {
     {
       years: { zh: "2026–至今", en: "2026–present" },
       crest: "/crests/whu.png",
+      href: "https://www.whu.edu.cn/",
       school: { zh: "武汉大学", en: "Wuhan University" },
       detail: {
         zh: "人工智能学院，智能科学与技术，博士在读",
@@ -185,6 +187,7 @@ export const profile = {
     {
       years: { zh: "2021–2024", en: "2021–2024" },
       crest: "/crests/muc.png",
+      href: "https://www.muc.edu.cn/",
       school: { zh: "中央民族大学", en: "Minzu University of China" },
       detail: {
         zh: "信息工程学院，计算机科学与技术，硕士",
@@ -194,6 +197,7 @@ export const profile = {
     {
       years: { zh: "2017–2021", en: "2017–2021" },
       crest: "/crests/wust.png",
+      href: "https://www.wust.edu.cn/",
       school: { zh: "武汉科技大学", en: "Wuhan University of Science and Technology" },
       detail: {
         zh: "计算机科学与技术学院，计算机科学与技术，本科",

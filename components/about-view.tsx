@@ -91,7 +91,14 @@ export function AboutView() {
                   className="mt-0.5 size-14 shrink-0"
                 />
                 <div>
-                  <p className="font-medium">{pick(item.school, lang)}</p>
+                  <a
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-primary underline underline-offset-4 hover:text-link-hover"
+                  >
+                    {pick(item.school, lang)}
+                  </a>
                   <p className="text-sm leading-6 text-muted-foreground">
                     {pick(item.detail, lang)}
                   </p>
