@@ -321,6 +321,7 @@ export function HeaderStatus() {
     if (!ip) return;
     let cancelled = false;
 
+    const located = ip;
     async function namePlace() {
       const here = coords;
       if (here) {
@@ -334,10 +335,15 @@ export function HeaderStatus() {
           // Fall through to the IP record's own names.
         }
       }
-      const city = cityLabel(ip.city);
-      const lines = ip.chinese
-        ? zhAddress(ip)
-        : addressLines([ip.country, ip.region, cityWithSuffix(ip.city), ip.district]);
+      const city = cityLabel(located.city);
+      const lines = located.chinese
+        ? zhAddress(located)
+        : addressLines([
+            located.country,
+            located.region,
+            cityWithSuffix(located.city),
+            located.district,
+          ]);
       if (!cancelled && (city || lines.length)) {
         setPlace({
           city: city || lines[lines.length - 1],
@@ -354,8 +360,8 @@ export function HeaderStatus() {
   }, [ip, lang, coords]);
 
   useEffect(() => {
+    if (!coords) return;
     const here = coords;
-    if (!here) return;
     let cancelled = false;
 
     async function load() {

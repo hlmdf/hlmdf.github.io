@@ -161,6 +161,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
     const el = identityRef.current;
     const settling = phase === "moving" || phase === "returning";
     if (!from || !el || !settling) return;
+    const node = el;
     const nextPhase: Phase = phase === "returning" ? "cover" : "in";
 
     const to = el.getBoundingClientRect();
@@ -175,8 +176,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
     const token = ++flipToken.current;
 
     function clearMotion() {
-      el.style.transition = "";
-      el.style.transform = "";
+      node.style.transition = "";
+      node.style.transform = "";
       if (!img) return;
       img.style.transition = "";
       img.style.transform = "";

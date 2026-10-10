@@ -283,7 +283,7 @@ export const profile = {
       ],
     },
   ] satisfies Thesis[],
-  talks: [] satisfies Talk[],
+  talks: [] as Talk[],
   news: [] satisfies Post[],
   life: [
     {
