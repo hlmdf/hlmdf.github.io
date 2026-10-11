@@ -374,7 +374,7 @@ export const profile = {
     {
       name: { zh: "B站音频提取", en: "Bilibili audio" },
     },
-  ] satisfies PersonalTool[],
+  ] as PersonalTool[],
   sites: [
     {
       id: "search",
