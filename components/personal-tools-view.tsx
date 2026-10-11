@@ -18,6 +18,8 @@ export function PersonalToolsView() {
               <a
                 className="text-primary underline underline-offset-4 hover:text-link-hover"
                 href={item.href}
+                target="_blank"
+                rel="noreferrer"
               >
                 {pick(item.name, lang)}
               </a>
