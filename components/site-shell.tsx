@@ -23,6 +23,7 @@ const nav = [
   { href: "/life", zh: "生活", en: "Life" },
   { href: "/tools", zh: "实用工具", en: "Tools" },
   { href: "/links", zh: "网址", en: "Links" },
+  { href: "/personal", zh: "个人工具", en: "Personal" },
 ] as const;
 
 function WechatIcon({ className }: { className?: string }) {

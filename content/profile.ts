@@ -60,6 +60,12 @@ export type Tool = {
   href: string;
 };
 
+export type PersonalTool = {
+  name: Copy;
+  /** Omit until the tool has a public address. */
+  href?: string;
+};
+
 export type ToolGroup = {
   title: Copy;
   items: Tool[];
@@ -364,6 +370,11 @@ export const profile = {
       ],
     },
   ] satisfies ToolGroup[],
+  personalTools: [
+    {
+      name: { zh: "B站音频提取", en: "Bilibili audio" },
+    },
+  ] satisfies PersonalTool[],
   sites: [
     {
       id: "search",
