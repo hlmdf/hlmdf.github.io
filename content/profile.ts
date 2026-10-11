@@ -94,7 +94,7 @@ export const profile = {
     zh: "李",
     en: "Xuan",
   } satisfies Copy,
-  avatar: "/头像.jpg",
+  avatar: "/avatar.jpg",
   role: {
     zh: "博士生",
     en: "Ph.D. student",

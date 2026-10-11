@@ -10,19 +10,24 @@ export type TocItem = { id: string; label: string };
 export function PageFrame({
   title,
   lede,
+  preface,
   toc,
   children,
 }: {
   title: string;
   lede?: string;
+  preface?: ReactNode;
   toc: TocItem[];
   children: ReactNode;
 }) {
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_11rem] lg:items-start lg:gap-x-10">
-      <PageHeader title={title} lede={lede} />
+    <div className="lg:inline-grid lg:max-w-full lg:grid-cols-[minmax(0,42rem)_max-content] lg:items-start lg:gap-x-6">
       <PageToc items={toc} />
-      <div className="min-w-0">{children}</div>
+      <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+        <PageHeader title={title} lede={lede} />
+        {preface}
+        {children}
+      </div>
     </div>
   );
 }
@@ -85,7 +90,7 @@ function PageToc({ items }: { items: TocItem[] }) {
   return (
     <nav
       aria-label={lang === "zh" ? "目录" : "Contents"}
-      className="mt-6 lg:sticky lg:top-24 lg:mt-1"
+      className="mb-8 w-fit lg:sticky lg:top-24 lg:col-start-2 lg:row-start-1 lg:mb-0 lg:mt-1"
     >
       <p className="text-sm font-medium">{lang === "zh" ? "目录" : "Contents"}</p>
       <ul className="mt-3 space-y-1 border-l border-border">

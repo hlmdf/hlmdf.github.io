@@ -30,13 +30,17 @@ export function AboutView() {
 
   return (
     <article>
-      <PageFrame title={lang === "zh" ? "关于我" : "About me"} toc={toc}>
-      {pick(profile.lookingFor, lang) ? (
-        <p className="mt-8 max-w-2xl border-l-2 border-primary pl-4 leading-8 text-muted-foreground">
-          {pick(profile.lookingFor, lang)}
-        </p>
-      ) : null}
-
+      <PageFrame
+        title={lang === "zh" ? "关于我" : "About me"}
+        toc={toc}
+        preface={
+          pick(profile.lookingFor, lang) ? (
+            <p className="mt-8 max-w-2xl border-l-2 border-primary pl-4 leading-8 text-muted-foreground">
+              {pick(profile.lookingFor, lang)}
+            </p>
+          ) : null
+        }
+      >
       <Section id="bio" title={lang === "zh" ? "简介" : "Short bio"}>
         <div className="max-w-2xl space-y-4 leading-8">
           {profile.bio.map((paragraph) => (
