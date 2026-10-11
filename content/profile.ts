@@ -373,7 +373,7 @@ export const profile = {
   personalTools: [
     {
       name: { zh: "B站音频提取", en: "Bilibili audio" },
-      href: "http://47.103.222.155:5000",
+      href: "https://47.103.222.155:5000",
     },
   ] as PersonalTool[],
   sites: [
