@@ -296,6 +296,25 @@ def enrich_movie(movie):
     return movie
 
 
+def apply_missing(current, updated):
+    """只补空着的字段，不覆盖已经填过的内容。"""
+    changed = False
+    if current.get("rating") in ("", None) and updated.get("rating") not in ("", None):
+        current["rating"] = updated["rating"]
+        changed = True
+    if not current.get("director") and updated.get("director"):
+        current["director"] = updated["director"]
+        changed = True
+    for key in ("actors", "genres", "regions"):
+        if not current.get(key) and updated.get(key):
+            current[key] = list(updated[key])
+            changed = True
+    if current.get("year") in ("", None) and updated.get("year") not in ("", None):
+        current["year"] = updated["year"]
+        changed = True
+    return changed
+
+
 def client_ip_of(handler):
     return handler.client_address[0]
 
@@ -348,8 +367,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.clean_path()
         if path == "/api/login":
             return self.handle_login()
-        if path == "/api/movies/fill-ratings":
-            return self.handle_fill_ratings()
+        if path == "/api/movies/fill-ratings" or path == "/api/movies/refresh":
+            return self.handle_refresh()
         if path == "/api/movies":
             return self.handle_create()
         self.send_json({"error": "没有这个接口"}, 404)
@@ -513,7 +532,7 @@ class Handler(SimpleHTTPRequestHandler):
             save_movies(kept)
         self.send_json({"ok": True, "items": kept})
 
-    def handle_fill_ratings(self):
+    def handle_refresh(self):
         if not self.require_auth():
             return
         with LOCK:
@@ -523,16 +542,33 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"error": str(exc)}, 500)
         changed = 0
         attempts = 0
+        more = False
         for movie in items:
-            if movie.get("rating") not in ("", None):
-                continue
             if not SUBJECT_RE.search(movie.get("douban") or ""):
+                continue
+            before = {
+                "rating": movie.get("rating"),
+                "director": movie.get("director"),
+                "actors": list(movie.get("actors") or []),
+                "genres": list(movie.get("genres") or []),
+                "regions": list(movie.get("regions") or []),
+                "year": movie.get("year"),
+            }
+            if not (
+                before["rating"] in ("", None)
+                or not before["director"]
+                or not before["actors"]
+                or not before["genres"]
+                or not before["regions"]
+                or before["year"] in ("", None)
+            ):
                 continue
             attempts += 1
             if attempts > 40:
+                more = True
                 break
             enrich_movie(movie)
-            if movie.get("rating") not in ("", None):
+            if apply_missing(before, movie):
                 changed += 1
         if changed:
             with LOCK:
@@ -543,15 +579,11 @@ class Handler(SimpleHTTPRequestHandler):
                 filled = {movie.get("id"): movie for movie in items}
                 for index, movie in enumerate(current):
                     updated = filled.get(movie.get("id"))
-                    if (
-                        updated
-                        and movie.get("rating") in ("", None)
-                        and updated.get("rating") not in ("", None)
-                    ):
-                        current[index] = updated
+                    if updated and apply_missing(movie, updated):
+                        current[index] = movie
                 save_movies(current)
                 items = current
-        self.send_json({"ok": True, "filled": changed, "items": items})
+        self.send_json({"ok": True, "filled": changed, "more": more, "items": items})
 
     def handle_import(self):
         if not self.require_auth():

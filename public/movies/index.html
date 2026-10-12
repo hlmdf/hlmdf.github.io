@@ -63,7 +63,7 @@
   }
   .home-link:hover { color: var(--accent); }
   body:not(.is-admin) #importBtn,
-  body:not(.is-admin) #fillBtn { display: none; }
+  body:not(.is-admin) #updateBtn { display: none; }
   #loginBtn {
     color: #111;
     background: var(--accent);
@@ -558,7 +558,7 @@
   </div>
   <div class="backup-btns">
     <button id="loginBtn" type="button">登录</button>
-    <button id="fillBtn" type="button">补全评分</button>
+    <button id="updateBtn" type="button">更新</button>
     <button id="exportBtn" type="button">导出备份</button>
     <button id="importBtn" type="button">导入</button>
     <input type="file" id="importFile" accept=".json" style="display:none">
@@ -1400,17 +1400,19 @@
   });
 
   /* ==================== 导出 / 导入 ==================== */
-  document.getElementById("fillBtn").addEventListener("click", function () {
+  document.getElementById("updateBtn").addEventListener("click", function () {
     if (!mustAdmin()) return;
     saving = true;
-    toast("正在向豆瓣补全评分…");
-    api("/api/movies/fill-ratings", { method: "POST", body: {} }).then(function (res) {
+    toast("正在从豆瓣补全资料…");
+    api("/api/movies/refresh", { method: "POST", body: {} }).then(function (res) {
       saving = false;
       applyList(res);
-      toast(res.filled ? "已补上 " + res.filled + " 部的豆瓣评分" : "没有需要补的评分");
+      var message = res.filled ? "已补全 " + res.filled + " 部的资料" : "没有需要补的资料";
+      if (res.more) message += "，还有没补完的，再点一次";
+      toast(message);
     }).catch(function (err) {
       saving = false;
-      toast(err.message || "补全失败");
+      toast(err.message || "更新失败");
     });
   });
 
