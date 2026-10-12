@@ -219,6 +219,83 @@ def new_id():
     return "m-" + secrets.token_hex(8)
 
 
+SUBJECT_RE = re.compile(r"subject/(\d+)")
+
+
+def fetch_douban(subject_id):
+    """豆瓣搜索接口没有分数，添加时再查一次影片摘要。"""
+    url = "https://movie.douban.com/j/subject_abstract?subject_id=" + urllib.parse.quote(subject_id)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "https://movie.douban.com/",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
+    subject = data.get("subject") if isinstance(data, dict) else None
+    if not isinstance(subject, dict):
+        return None
+    rating = ""
+    if subject.get("rate") not in ("", None):
+        try:
+            rating = round(float(subject.get("rate")), 1)
+        except (TypeError, ValueError):
+            rating = ""
+        if rating != "" and (rating < 0 or rating > 10):
+            rating = ""
+    directors = subject.get("directors") if isinstance(subject.get("directors"), list) else []
+    actors = subject.get("actors") if isinstance(subject.get("actors"), list) else []
+    genres = subject.get("types") if isinstance(subject.get("types"), list) else []
+    regions = [part for part in re.split(r"[\s/／、,，]+", str(subject.get("region") or "")) if part]
+    year = ""
+    if subject.get("release_year") not in ("", None):
+        try:
+            year = int(subject.get("release_year"))
+        except (TypeError, ValueError):
+            year = ""
+    return {
+        "rating": rating,
+        "director": "，".join(str(name) for name in directors[:3] if name),
+        "actors": [str(name) for name in actors[:8] if name],
+        "genres": [str(name) for name in genres[:8] if name],
+        "regions": regions[:8],
+        "year": year,
+    }
+
+
+def enrich_movie(movie):
+    match = SUBJECT_RE.search(movie.get("douban") or "")
+    if not match:
+        return movie
+    needs = (
+        movie.get("rating") in ("", None)
+        or not movie.get("director")
+        or not movie.get("actors")
+        or not movie.get("genres")
+        or not movie.get("regions")
+    )
+    if not needs:
+        return movie
+    info = fetch_douban(match.group(1))
+    if not info:
+        return movie
+    if movie.get("rating") in ("", None) and info["rating"] != "":
+        movie["rating"] = info["rating"]
+    if not movie.get("director") and info["director"]:
+        movie["director"] = info["director"]
+    if not movie.get("actors") and info["actors"]:
+        movie["actors"] = info["actors"]
+    if not movie.get("genres") and info["genres"]:
+        movie["genres"] = info["genres"]
+    if not movie.get("regions") and info["regions"]:
+        movie["regions"] = info["regions"]
+    if movie.get("year") in ("", None) and info["year"] != "":
+        movie["year"] = info["year"]
+    return movie
+
+
 def client_ip_of(handler):
     return handler.client_address[0]
 
@@ -271,6 +348,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.clean_path()
         if path == "/api/login":
             return self.handle_login()
+        if path == "/api/movies/fill-ratings":
+            return self.handle_fill_ratings()
         if path == "/api/movies":
             return self.handle_create()
         self.send_json({"error": "没有这个接口"}, 404)
@@ -383,6 +462,7 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             body = self.read_json()
             movie = clean_movie(body, new_id())
+            movie = enrich_movie(movie)
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 400)
         with LOCK:
@@ -403,6 +483,7 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             body = self.read_json()
             movie = clean_movie(body, movie_id)
+            movie = enrich_movie(movie)
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 400)
         with LOCK:
@@ -431,6 +512,46 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"error": "没有这部片子"}, 404)
             save_movies(kept)
         self.send_json({"ok": True, "items": kept})
+
+    def handle_fill_ratings(self):
+        if not self.require_auth():
+            return
+        with LOCK:
+            try:
+                items = load_movies()
+            except ValueError as exc:
+                return self.send_json({"error": str(exc)}, 500)
+        changed = 0
+        attempts = 0
+        for movie in items:
+            if movie.get("rating") not in ("", None):
+                continue
+            if not SUBJECT_RE.search(movie.get("douban") or ""):
+                continue
+            attempts += 1
+            if attempts > 40:
+                break
+            enrich_movie(movie)
+            if movie.get("rating") not in ("", None):
+                changed += 1
+        if changed:
+            with LOCK:
+                try:
+                    current = load_movies()
+                except ValueError as exc:
+                    return self.send_json({"error": str(exc)}, 500)
+                filled = {movie.get("id"): movie for movie in items}
+                for index, movie in enumerate(current):
+                    updated = filled.get(movie.get("id"))
+                    if (
+                        updated
+                        and movie.get("rating") in ("", None)
+                        and updated.get("rating") not in ("", None)
+                    ):
+                        current[index] = updated
+                save_movies(current)
+                items = current
+        self.send_json({"ok": True, "filled": changed, "items": items})
 
     def handle_import(self):
         if not self.require_auth():
