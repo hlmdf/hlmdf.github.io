@@ -409,6 +409,7 @@ def interest_to_movie(interest):
 DOUBAN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 DOUBAN_GRID_PAGE = 15
 COLLECT_KIND = {"done": "collect", "doing": "do", "mark": "wish"}
+PAGE_STATUS_TO_DOUBAN = {"watched": "collect", "doing": "do", "want": "wish"}
 
 
 class DoubanNoRedirect(urllib.request.HTTPRedirectHandler):
@@ -664,6 +665,72 @@ def captcha_challenge(data, opener):
     if image_url:
         return {"error": "豆瓣验证码没有加载出来", "code": 502}
     return {"error": douban_error_text(data), "code": 400}
+
+
+def mark_douban_interest(cookies, sid, status):
+    """把一部片子标进已登录的豆瓣。不在这里删除。"""
+    if not re.fullmatch(r"\d{1,12}", str(sid or "")):
+        raise ValueError("没有豆瓣链接，没法同步")
+    interest = PAGE_STATUS_TO_DOUBAN.get(status or "")
+    if not interest:
+        raise ValueError("状态不对")
+    opener, jar = opener_from_cookies(cookies)
+    try:
+        opener.open(urllib.request.Request(
+            "https://movie.douban.com/subject/%s/" % sid,
+            headers={"User-Agent": DOUBAN_UA},
+        ), timeout=15).read()
+    except Exception:
+        pass
+    ck = jar_dict(jar).get("ck") or (cookies or {}).get("ck") or ""
+    if not ck:
+        raise ValueError("豆瓣登录已失效，请重新登录")
+    fields = {
+        "ck": ck,
+        "interest": interest,
+        "rating": "",
+        "fold": "F",
+        "tags": "",
+        "comment": "",
+    }
+    req = urllib.request.Request(
+        "https://movie.douban.com/j/subject/%s/interest" % sid,
+        data=urllib.parse.urlencode(fields).encode("utf-8"),
+        headers={
+            "User-Agent": DOUBAN_UA,
+            "Origin": "https://movie.douban.com",
+            "Referer": "https://movie.douban.com/subject/%s/" % sid,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    try:
+        with opener.open(req, timeout=20) as response:
+            raw = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+        if exc.code in (401, 403):
+            raise ValueError("豆瓣登录已失效，请重新登录")
+    except Exception:
+        raise ValueError("豆瓣暂时没有回应")
+    if raw.lstrip().startswith("<"):
+        raise ValueError("豆瓣没有收下，过几分钟再试")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if data.get("r") in (0, "0") or data.get("status") == "success":
+        updated = jar_dict(jar)
+        if uid_from_cookies(updated):
+            save_douban_session(updated)
+        return
+    message = str(data.get("msg") or data.get("message") or "")
+    if "登录" in message or "登录" in raw:
+        raise ValueError("豆瓣登录已失效，请重新登录")
+    raise ValueError((message or "没有写进豆瓣")[:80])
 
 
 def complete_douban_login(cookies):
@@ -997,6 +1064,7 @@ class Handler(SimpleHTTPRequestHandler):
             movie = enrich_movie(movie)
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 400)
+        sync = isinstance(body, dict) and body.get("syncDouban") is True
         with LOCK:
             try:
                 items = load_movies()
@@ -1006,7 +1074,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"error": "片单已经太多了"}, 400)
             items.append(movie)
             save_movies(items)
-        self.send_json({"ok": True, "item": movie, "items": items})
+        douban_sync = self.sync_new_movie(movie) if sync else None
+        self.send_json({"ok": True, "item": movie, "items": items, "doubanSync": douban_sync})
+
+    def sync_new_movie(self, movie):
+        session = load_douban_session()
+        if not session:
+            return {"ok": False, "error": "请先登录豆瓣"}
+        sid = subject_id_of(movie)
+        if not sid:
+            return {"ok": False, "error": "没有豆瓣链接，没法同步"}
+        try:
+            mark_douban_interest(session["cookies"], sid, movie.get("status") or "watched")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
 
     def handle_update(self, movie_id):
         if not self.require_auth():
@@ -1241,6 +1323,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not statuses:
             return self.send_json({"error": "请至少选择看过、在看或想看中的一种"}, 400)
         raw_cursors = body.get("cursors") if isinstance(body.get("cursors"), dict) else {}
+        full = body.get("full") is True
         with LOCK:
             try:
                 current = load_movies()
@@ -1251,6 +1334,7 @@ class Handler(SimpleHTTPRequestHandler):
         fresh = []
         skipped = 0
         duplicate = 0
+        status_plan = {}
         more = False
         next_cursors = {}
         progress = {}
@@ -1268,6 +1352,7 @@ class Handler(SimpleHTTPRequestHandler):
                 except (TypeError, ValueError):
                     start = 0
                 finished = False
+                caught_up = False
                 read = start
                 total_count = 0
                 empty_tries = 0
@@ -1291,13 +1376,17 @@ class Handler(SimpleHTTPRequestHandler):
                         continue
                     empty_tries = 0
                     page_done = True
+                    page_known = True
+                    new_status = DOUBAN_STATUS.get(status, "watched")
                     for card in cards:
                         sid = card["sid"]
+                        if sid in already_ids:
+                            status_plan[sid] = new_status
+                            skipped += 1
+                            continue
+                        page_known = False
                         if sid in seen:
-                            if sid in already_ids:
-                                skipped += 1
-                            else:
-                                duplicate += 1
+                            duplicate += 1
                             continue
                         try:
                             movie = movie_from_card(card, status)
@@ -1315,8 +1404,17 @@ class Handler(SimpleHTTPRequestHandler):
                     if total_count and start >= total_count:
                         finished = True
                         break
+                    if page_known and not full:
+                        finished = True
+                        caught_up = True
+                        break
                     time.sleep(0.12)
-                progress[status] = {"read": read, "total": total_count, "done": finished}
+                progress[status] = {
+                    "read": read,
+                    "total": total_count,
+                    "done": finished,
+                    "caughtUp": caught_up,
+                }
                 next_cursors[status] = -1 if finished else start
                 if not finished:
                     more = True
@@ -1344,6 +1442,14 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError as exc:
                 return self.send_json({"error": str(exc)}, 500)
             have = {sid for sid in (subject_id_of(movie) for movie in current) if sid}
+            status_changed = 0
+            if status_plan:
+                for movie in current:
+                    sid = subject_id_of(movie)
+                    new_status = status_plan.get(sid)
+                    if new_status and movie.get("status") != new_status:
+                        movie["status"] = new_status
+                        status_changed += 1
             for movie in fresh:
                 sid = subject_id_of(movie)
                 if sid in have:
@@ -1355,14 +1461,17 @@ class Handler(SimpleHTTPRequestHandler):
                 have.add(sid)
                 current.append(movie)
                 inserted.append(movie)
-            if inserted:
+            if inserted or status_changed:
                 save_movies(current)
+        caught_up = any(item.get("caughtUp") for item in progress.values())
         self.send_json({
             "ok": True,
             "added": len(inserted),
+            "updated": status_changed,
             "counts": count_added(inserted),
             "skipped": skipped,
             "duplicate": duplicate,
+            "caughtUp": caught_up and not more,
             "more": more,
             "progress": progress,
             "cursors": next_cursors,

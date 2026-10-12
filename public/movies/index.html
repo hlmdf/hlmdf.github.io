@@ -657,6 +657,10 @@
   .douban-code-row button { white-space: nowrap; padding: 9px 12px; }
   #doubanMode { margin-top: 14px; }
   #doubanMode button.active { border-color: var(--accent); color: var(--accent); }
+  .douban-sync-note { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .btn-line { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  .btn-line:hover { filter: brightness(1.1); }
+  #confirmMask .confirm-modal { max-width: 420px; }
   .confirm-text { color: var(--muted); font-size: 14px; line-height: 1.7; }
 
   /* 提示条 */
@@ -859,7 +863,7 @@
 <div class="modal-mask" id="doubanImportMask">
   <div class="modal confirm-modal">
     <h3>从豆瓣导入</h3>
-    <p class="confirm-text">要登录你的豆瓣账号，才能读到登录后才看得到的片子。密码和短信验证码只用来登录，不会写进片单。</p>
+    <p class="confirm-text" id="doubanLoginHint">要登录你的豆瓣账号，才能读到登录后才看得到的片子。密码和短信验证码只用来登录，不会写进片单。</p>
     <div class="status-toggle" id="doubanMode">
       <button type="button" data-mode="phone" class="active">手机验证码</button>
       <button type="button" data-mode="password">账号密码</button>
@@ -905,9 +909,11 @@
         <button type="button" data-status="doing" class="active">在看</button>
         <button type="button" data-status="want" class="active">想看</button>
       </div>
+      <p class="douban-sync-note">开始导入只核对最新的。整理导入会把豆瓣上有、这里删掉的旧片补回来，比较慢。</p>
       <div class="search-status" id="doubanImportStatus"></div>
       <div class="modal-btns">
         <button type="button" class="btn-cancel" id="doubanLogoutBtn">退出豆瓣</button>
+        <button type="button" class="btn-line" id="doubanTidyBtn">整理导入</button>
         <button type="submit" class="btn-save" id="doubanImportSubmit">开始导入</button>
       </div>
     </form>
@@ -948,8 +954,9 @@
     <h3>删除确认</h3>
     <p class="confirm-text" id="confirmText"></p>
     <div class="modal-btns">
-      <button class="btn-cancel" id="confirmCancel">取消</button>
-      <button class="btn-danger" id="confirmOk">确认删除</button>
+      <button type="button" class="btn-cancel" id="confirmCancel">取消</button>
+      <button type="button" class="btn-cancel" id="confirmAlt" style="display:none">只加在这里</button>
+      <button type="button" class="btn-danger" id="confirmOk">确认删除</button>
     </div>
   </div>
 </div>
@@ -1128,12 +1135,12 @@
     return true;
   }
 
-  function toast(msg) {
+  function toast(msg, ms) {
     var t = document.getElementById("toast");
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(t._timer);
-    t._timer = setTimeout(function () { t.classList.remove("show"); }, 1800);
+    t._timer = setTimeout(function () { t.classList.remove("show"); }, ms || 1800);
   }
 
   /* ==================== 渲染 ==================== */
@@ -1500,17 +1507,7 @@
           douban: (r.url || "").split("?")[0],
           poster: r.img || ""
         };
-        saving = true;
-        api("/api/movies", { method: "POST", body: item }).then(function (res) {
-          saving = false;
-          applyList(res);
-          el.classList.add("added");
-          el.querySelector(".rtype").textContent = "已添加";
-          toast("已添加《" + item.title + "》" + (res.item && res.item.rating !== "" && res.item.rating != null ? "，豆瓣 " + res.item.rating : ""));
-        }).catch(function (err) {
-          saving = false;
-          toast(err.message || "添加失败");
-        });
+        addMovie(item, el);
       });
     });
   }
@@ -1537,22 +1534,92 @@
     };
 
     if (!mustAdmin()) return;
-    var wasEdit = !!editingId;
-    var id = editingId;
-    saving = true;
-    var req = wasEdit
-      ? api("/api/movies/" + encodeURIComponent(id), { method: "PUT", body: data })
-      : api("/api/movies", { method: "POST", body: data });
-    req.then(function (res) {
-      saving = false;
+    if (editingId) {
+      var id = editingId;
+      saving = true;
+      api("/api/movies/" + encodeURIComponent(id), { method: "PUT", body: data }).then(function (res) {
+        saving = false;
+        closeModal();
+        applyList(res);
+        toast("已保存修改");
+      }).catch(function (err) {
+        saving = false;
+        toast(err.message || "保存失败");
+      });
+      return;
+    }
+    addMovie(data, null);
+  });
+
+  var pendingDoubanAdd = null;
+
+  function doubanSubjectId(url) {
+    var match = String(url || "").match(/subject\/(\d+)/);
+    return match ? match[1] : "";
+  }
+
+  function finishAdd(res, data, el) {
+    saving = false;
+    applyList(res);
+    var rating = res.item && res.item.rating !== "" && res.item.rating != null ? "，豆瓣 " + res.item.rating : "";
+    var syncNote = "";
+    if (res.doubanSync && res.doubanSync.ok) syncNote = "，已同步到豆瓣「" + statusName(data.status) + "」";
+    else if (res.doubanSync && res.doubanSync.ok === false) syncNote = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+    if (el) {
+      el.classList.add("added");
+      var tag = el.querySelector(".rtype");
+      if (tag) tag.textContent = "已添加";
+    } else {
       closeModal();
-      applyList(res);
-      toast(wasEdit ? "已保存修改" : "已添加《" + data.title + "》" + (res.item && res.item.rating !== "" && res.item.rating != null ? "，豆瓣 " + res.item.rating : ""));
+    }
+    toast("已添加《" + data.title + "》" + rating + syncNote, syncNote.indexOf("没写进") === -1 ? 2200 : 4200);
+  }
+
+  function postMovie(data, sync, el) {
+    saving = true;
+    api("/api/movies", { method: "POST", body: Object.assign({}, data, { syncDouban: !!sync }) }).then(function (res) {
+      finishAdd(res, data, el);
     }).catch(function (err) {
       saving = false;
-      toast(err.message || "保存失败");
+      toast(err.message || "添加失败");
     });
-  });
+  }
+
+  function openDoubanLoginForAdd() {
+    doubanLoginStatus.textContent = "登录后会把刚才那部写进豆瓣";
+    showDoubanLogin();
+    doubanImportMask.classList.add("show");
+    setTimeout(function () { document.getElementById("doubanPhone").focus(); }, 50);
+  }
+
+  function addMovie(data, el) {
+    if (!mustAdmin() || saving) return;
+    var sid = doubanSubjectId(data.douban);
+    if (!sid) {
+      askConfirm("这部没有豆瓣链接，只能加在这个页面上，不会同步到豆瓣。", function () {
+        postMovie(data, false, el);
+      }, { title: "无法同步", ok: "只加在这里", okClass: "btn-save" });
+      return;
+    }
+    api("/api/douban/session").then(function (session) {
+      if (session.loggedIn) {
+        postMovie(data, true, el);
+        return;
+      }
+      askConfirm("还没登录豆瓣。要写进豆瓣，需要先登录。", function () {
+        pendingDoubanAdd = { data: data, el: el };
+        openDoubanLoginForAdd();
+      }, {
+        title: "同步到豆瓣",
+        ok: "登录并同步",
+        okClass: "btn-save",
+        alt: "只加在这里",
+        altAction: function () { postMovie(data, false, el); }
+      });
+    }).catch(function (err) {
+      toast(err.message || "没能确认豆瓣登录状态");
+    });
+  }
 
   /* ==================== 详情：先展开，再由按钮去豆瓣 ==================== */
   var detailMask = document.getElementById("detailMask");
@@ -1688,11 +1755,23 @@
   var confirmMask = document.getElementById("confirmMask");
   var confirmText = document.getElementById("confirmText");
   var confirmAction = null;
+  var confirmAltAction = null;
 
   function askConfirm(text, action, options) {
     options = options || {};
     document.querySelector("#confirmMask h3").textContent = options.title || "删除确认";
-    document.getElementById("confirmOk").textContent = options.ok || "确认删除";
+    var okBtn = document.getElementById("confirmOk");
+    okBtn.textContent = options.ok || "确认删除";
+    okBtn.className = options.okClass || "btn-danger";
+    var altBtn = document.getElementById("confirmAlt");
+    if (options.alt) {
+      altBtn.style.display = "";
+      altBtn.textContent = options.alt;
+      confirmAltAction = options.altAction || null;
+    } else {
+      altBtn.style.display = "none";
+      confirmAltAction = null;
+    }
     confirmText.textContent = text;
     confirmAction = action;
     confirmMask.classList.add("show");
@@ -1701,8 +1780,12 @@
   function closeConfirm() {
     confirmMask.classList.remove("show");
     confirmAction = null;
+    confirmAltAction = null;
     document.querySelector("#confirmMask h3").textContent = "删除确认";
-    document.getElementById("confirmOk").textContent = "确认删除";
+    var okBtn = document.getElementById("confirmOk");
+    okBtn.textContent = "确认删除";
+    okBtn.className = "btn-danger";
+    document.getElementById("confirmAlt").style.display = "none";
   }
 
   document.getElementById("confirmCancel").addEventListener("click", closeConfirm);
@@ -1712,10 +1795,15 @@
     closeConfirm();
     if (action) action();
   });
+  document.getElementById("confirmAlt").addEventListener("click", function () {
+    var action = confirmAltAction;
+    closeConfirm();
+    if (action) action();
+  });
 
   function askDelete(item) {
     if (!mustAdmin()) return;
-    askConfirm("确定删除《" + item.title + "》吗？此操作不可恢复。", function () {
+    askConfirm("确定删除《" + item.title + "》吗？只从这里删除，豆瓣上的标记还在。", function () {
       saving = true;
       api("/api/movies/" + encodeURIComponent(item.id), { method: "DELETE" }).then(function (res) {
         saving = false;
@@ -1853,8 +1941,10 @@
     } else {
       lines.push("没有新的电影或电视剧");
     }
-    if (res.skipped) lines.push("片单里已有的 " + res.skipped + " 部已跳过");
+    if (res.updated) lines.push("状态改成和豆瓣一样的有 " + res.updated + " 部");
+    if (res.skipped && !res.caughtUp) lines.push("片单里已有的 " + res.skipped + " 部已跳过");
     if (res.duplicate) lines.push("豆瓣里有 " + res.duplicate + " 部重复记录，只保留了一条");
+    if (res.caughtUp) lines.push("只核对了最新的几页，更早的没有再翻");
     if (res.more) lines.push("还有没导完的，正在继续");
     var note = progressNote(res.progress);
     if (note) lines.push(note);
@@ -1866,15 +1956,23 @@
     var names = { done: "看过", doing: "在看", mark: "想看" };
     var bits = [];
     var incomplete = false;
+    var caught = false;
     ["done", "doing", "mark"].forEach(function (key) {
       var item = progress[key];
       if (!item || !item.total) return;
+      if (item.caughtUp) {
+        bits.push(names[key] + " 只看了最新的");
+        caught = true;
+        return;
+      }
       var read = Math.min(item.read || 0, item.total);
       bits.push(names[key] + " " + read + "/" + item.total);
       if (read < item.total) incomplete = true;
     });
     if (!bits.length) return "";
-    return "豆瓣原表：" + bits.join("，") + (incomplete ? "。还没读完" : "。这几栏已经读完");
+    if (incomplete) return "豆瓣原表：" + bits.join("，") + "。还没读完";
+    if (caught) return "豆瓣原表：" + bits.join("，");
+    return "豆瓣原表：" + bits.join("，") + "。这几栏已经读完";
   }
 
   function importStillShort(res) {
@@ -1945,13 +2043,23 @@
     btn.classList.toggle("active");
   });
   function showDoubanLogin() {
+    document.getElementById("doubanLoginHint").style.display = "";
+    document.getElementById("doubanMode").style.display = "";
     document.getElementById("doubanLoginForm").style.display = "";
     document.getElementById("doubanImportForm").style.display = "none";
   }
   function showDoubanReady(uid) {
+    document.getElementById("doubanLoginHint").style.display = "none";
+    document.getElementById("doubanMode").style.display = "none";
     document.getElementById("doubanLoginForm").style.display = "none";
     document.getElementById("doubanImportForm").style.display = "";
-    document.getElementById("doubanWho").textContent = "已登录豆瓣账号 " + uid + "。只导入电影和电视剧。";
+    document.getElementById("doubanWho").textContent = "已登录豆瓣账号 " + uid + "。只导入电影和电视剧。开始导入只核对最新的，整理导入才补旧片。";
+    if (pendingDoubanAdd) {
+      var pending = pendingDoubanAdd;
+      pendingDoubanAdd = null;
+      doubanImportMask.classList.remove("show");
+      postMovie(pending.data, true, pending.el);
+    }
   }
   document.getElementById("doubanImportBtn").addEventListener("click", function () {
     if (!mustAdmin()) return;
@@ -1964,12 +2072,19 @@
       else document.getElementById(doubanMode === "phone" ? "doubanPhone" : "doubanAccount").focus();
     }).catch(function () {});
   });
+  function closeDoubanImport() {
+    doubanImportMask.classList.remove("show");
+    if (pendingDoubanAdd) {
+      pendingDoubanAdd = null;
+      toast("这部还没加上");
+    }
+  }
   document.getElementById("doubanImportCancel").addEventListener("click", function () {
     if (saving) return;
-    doubanImportMask.classList.remove("show");
+    closeDoubanImport();
   });
   doubanImportMask.addEventListener("click", function (e) {
-    if (e.target === doubanImportMask && !saving) doubanImportMask.classList.remove("show");
+    if (e.target === doubanImportMask && !saving) closeDoubanImport();
   });
   function doubanPhone() {
     return document.getElementById("doubanPhone").value.replace(/\s/g, "");
@@ -2133,8 +2248,11 @@
       doubanImportStatus.textContent = err.message || "退出失败";
     });
   });
-  document.getElementById("doubanImportForm").addEventListener("submit", function (e) {
-    e.preventDefault();
+  function setDoubanImportBusy(on) {
+    document.getElementById("doubanImportSubmit").disabled = on;
+    document.getElementById("doubanTidyBtn").disabled = on;
+  }
+  function startDoubanImport(fullScan) {
     if (!mustAdmin()) return;
     var statusMap = { watched: "done", doing: "doing", want: "mark" };
     var statuses = [];
@@ -2144,11 +2262,14 @@
     if (!statuses.length) { doubanImportStatus.textContent = "请至少选择一种"; return; }
     doubanCursors = {};
     saving = true;
-    document.getElementById("doubanImportSubmit").disabled = true;
-    doubanImportStatus.textContent = "正在从豆瓣读取。看过和想看加起来有一千部左右，会分几次拉，请先别关这个窗口…";
+    setDoubanImportBusy(true);
+    doubanImportStatus.textContent = fullScan
+      ? "正在把整张豆瓣表再读一遍。看过和想看加起来有一千部左右，会分几次拉，请先别关这个窗口…"
+      : "只核对最新的片子。翻到已经在片单里的那一页就停。";
     var added = 0;
     var skipped = 0;
     var duplicate = 0;
+    var updated = 0;
     var startedEmpty = items.length === 0;
     var counts = emptyCounts();
     var rounds = 0;
@@ -2156,14 +2277,14 @@
       rounds += 1;
       if (rounds > 40) {
         saving = false;
-        document.getElementById("doubanImportSubmit").disabled = false;
-        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, duplicate: duplicate, counts: counts, more: true });
+        setDoubanImportBusy(false);
+        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, duplicate: duplicate, updated: updated, counts: counts, more: true });
         toast(added ? "新加 " + added + " 部" : "还没有导完");
         return;
       }
       api("/api/movies/import-douban", {
         method: "POST",
-        body: { statuses: statuses, cursors: doubanCursors }
+        body: { statuses: statuses, cursors: doubanCursors, full: fullScan }
       }).then(function (res) {
         applyList(res);
         added += res.added || 0;
@@ -2175,6 +2296,7 @@
         }
         skipped += batchSkipped;
         duplicate += batchDuplicate;
+        updated += res.updated || 0;
         mergeCounts(counts, res.counts);
         doubanCursors = res.cursors || {};
         var keepGoing = res.more || importStillShort(res);
@@ -2184,13 +2306,13 @@
           return;
         }
         saving = false;
-        document.getElementById("doubanImportSubmit").disabled = false;
-        var summary = { added: added, skipped: skipped, duplicate: duplicate, counts: counts, more: false, progress: res.progress };
+        setDoubanImportBusy(false);
+        var summary = { added: added, skipped: skipped, duplicate: duplicate, updated: updated, caughtUp: !!res.caughtUp, counts: counts, more: false, progress: res.progress };
         doubanImportStatus.textContent = importSummary(summary);
         toast(added ? "新加 " + added + " 部" : "没有新的电影或电视剧");
       }).catch(function (err) {
         saving = false;
-        document.getElementById("doubanImportSubmit").disabled = false;
+        setDoubanImportBusy(false);
         var message = err.message || "导入失败";
         if (message.indexOf("登录豆瓣") !== -1 || message.indexOf("重新登录") !== -1) {
           showDoubanLogin();
@@ -2203,6 +2325,13 @@
       });
     }
     pull();
+  }
+  document.getElementById("doubanImportForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    startDoubanImport(false);
+  });
+  document.getElementById("doubanTidyBtn").addEventListener("click", function () {
+    startDoubanImport(true);
   });
 
   /* ==================== 筛选 / 搜索 ==================== */
