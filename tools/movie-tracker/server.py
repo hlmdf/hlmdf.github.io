@@ -179,6 +179,20 @@ def clean_url(value):
     return url
 
 
+def larger_poster(value):
+    """搜索列表给的是高度大约 120 的缩略图，换成豆瓣的中号海报。"""
+    url = clean_url(value)
+    if not url:
+        return ""
+    host = urllib.parse.urlparse(url).netloc.lower()
+    if not (host.endswith("doubanio.com") or host.endswith("douban.com")):
+        return url
+    match = re.search(r"/(p\d+)\.(?:jpg|jpeg|webp|png)", urllib.parse.urlparse(url).path, re.I)
+    if not match:
+        return url
+    return "https://img3.doubanio.com/view/photo/m_ratio_poster/public/%s.jpg" % match.group(1)
+
+
 def clean_movie(body, movie_id):
     if not isinstance(body, dict):
         raise ValueError("格式不对")
@@ -220,7 +234,7 @@ def clean_movie(body, movie_id):
         "genres": list_of(body.get("genres")),
         "rating": rating_out,
         "douban": clean_url(body.get("douban")),
-        "poster": clean_url(body.get("poster")),
+        "poster": larger_poster(body.get("poster")),
     }
 
 

@@ -1089,6 +1089,12 @@
   }
 
   // 豆瓣图片需要服务器中转时的备用地址（标记在 data-relay 上）
+  function posterUrl(url) {
+    var match = String(url || "").match(/\/(p\d+)\.(?:jpg|jpeg|webp|png)/i);
+    if (!match || !/douban(?:io)?\.com/i.test(url)) return url || "";
+    return "https://img3.doubanio.com/view/photo/m_ratio_poster/public/" + match[1] + ".jpg";
+  }
+
   function relayAttr(src) {
     return /doubanio\.com|douban\.com/.test(src) ? ' data-relay="' + esc(src) + '"' : "";
   }
@@ -1154,8 +1160,9 @@
     var statusCls = item.status === "want" ? "want" : (item.status === "doing" ? "doing" : "watched");
     var ratingBadge = (item.rating !== undefined && item.rating !== "" && item.rating !== null)
       ? '<span class="badge rating">★ ' + esc(item.rating) + '</span>' : "";
-    var posterImg = item.poster
-      ? '<img src="' + esc(item.poster) + '"' + relayAttr(item.poster) + ' loading="lazy" alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var poster = posterUrl(item.poster);
+    var posterImg = poster
+      ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' loading="lazy" alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
 
     return '' +
     '<div class="card" role="button" tabindex="0" aria-label="' + esc(item.title) + '" data-id="' + esc(item.id) + '">' +
@@ -1526,7 +1533,7 @@
           genres: [],
           rating: "",
           douban: (r.url || "").split("?")[0],
-          poster: r.img || ""
+          poster: posterUrl(r.img) || ""
         };
         addMovie(item, el);
       });
@@ -1652,8 +1659,9 @@
 
   function openDetail(item) {
     var statusCls = item.status === "want" ? "want" : (item.status === "doing" ? "doing" : "watched");
-    var posterImg = item.poster
-      ? '<img src="' + esc(item.poster) + '"' + relayAttr(item.poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var poster = posterUrl(item.poster);
+    var posterImg = poster
+      ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
     var score = (item.rating !== undefined && item.rating !== "" && item.rating !== null)
       ? '<div class="detail-score">★ ' + esc(item.rating) + '</div>' : "";
     document.getElementById("detailBody").innerHTML =
