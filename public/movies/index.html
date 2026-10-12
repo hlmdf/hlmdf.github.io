@@ -1522,8 +1522,39 @@
       lines.push("没有新的电影或电视剧");
     }
     if (res.skipped) lines.push("已有的 " + res.skipped + " 部已跳过");
-    if (res.more) lines.push("还有没导完的，再点一次会接着导入");
+    if (res.more) lines.push("还有没导完的，正在继续");
+    var note = progressNote(res.progress);
+    if (note) lines.push(note);
     return lines.join("\n");
+  }
+
+  function progressNote(progress) {
+    if (!progress) return "";
+    var names = { done: "看过", doing: "在看", mark: "想看" };
+    var bits = [];
+    var incomplete = false;
+    ["done", "doing", "mark"].forEach(function (key) {
+      var item = progress[key];
+      if (!item || !item.total) return;
+      var read = Math.min(item.read || 0, item.total);
+      bits.push(names[key] + " " + read + "/" + item.total);
+      if (read < item.total) incomplete = true;
+    });
+    if (!bits.length) return "";
+    return "豆瓣原表：" + bits.join("，") + (incomplete ? "。还没读完" : "。这几栏已经读完");
+  }
+
+  function importStillShort(res) {
+    var progress = res.progress || {};
+    var cursors = res.cursors || {};
+    var short = false;
+    ["done", "doing", "mark"].forEach(function (key) {
+      var item = progress[key];
+      if (!item || !item.total || (item.read || 0) >= item.total) return;
+      if (cursors[key] === -1) return;
+      short = true;
+    });
+    return short;
   }
 
   function importProgress(added, res) {
@@ -1592,10 +1623,8 @@
       statuses.push(statusMap[btn.getAttribute("data-status")]);
     });
     if (!statuses.length) { doubanImportStatus.textContent = "请至少选择一种"; return; }
-    if (user !== doubanCursorUser) {
-      doubanCursorUser = user;
-      doubanCursors = {};
-    }
+    doubanCursorUser = user;
+    doubanCursors = {};
     saving = true;
     document.getElementById("doubanImportSubmit").disabled = true;
     doubanImportStatus.textContent = "正在从豆瓣读取。看过和想看加起来有一千部左右，会分几次拉，请先别关这个窗口…";
@@ -1621,14 +1650,16 @@
         skipped += res.skipped || 0;
         mergeCounts(counts, res.counts);
         doubanCursors = res.cursors || {};
-        if (res.more) {
+        var keepGoing = res.more || importStillShort(res);
+        if (keepGoing) {
           doubanImportStatus.textContent = importProgress(added, res);
           pull();
           return;
         }
         saving = false;
         document.getElementById("doubanImportSubmit").disabled = false;
-        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, counts: counts, more: false });
+        var summary = { added: added, skipped: skipped, counts: counts, more: false, progress: res.progress };
+        doubanImportStatus.textContent = importSummary(summary);
         toast(added ? "新加 " + added + " 部" : "没有新的电影或电视剧");
       }).catch(function (err) {
         saving = false;

@@ -762,14 +762,21 @@ class Handler(SimpleHTTPRequestHandler):
                 finished = False
                 read = start
                 total_count = 0
+                empty_tries = 0
                 while True:
                     if time.time() > deadline or len(fresh) >= 2000:
                         break
                     interests, total_count = fetch_douban_interests(uid, status, start)
                     if not interests:
-                        finished = True
-                        read = total_count or read
+                        # 这一页是空的，但总数还没读到，就再试一次，不能当成整栏结束。
+                        if total_count and read < total_count and empty_tries < 2:
+                            empty_tries += 1
+                            time.sleep(0.4)
+                            continue
+                        if not total_count or read >= total_count:
+                            finished = True
                         break
+                    empty_tries = 0
                     for interest in interests:
                         movie = interest_to_movie(interest)
                         if not movie:
@@ -781,11 +788,12 @@ class Handler(SimpleHTTPRequestHandler):
                             continue
                         seen.add(sid)
                         fresh.append(movie)
-                    read = start + len(interests)
-                    if len(interests) < 50:
+                    # 豆瓣有时一页不足 50 部，后面却还有。按实际条数往后翻，读到总数才算结束。
+                    start += len(interests)
+                    read = start
+                    if total_count and read >= total_count:
                         finished = True
                         break
-                    start += 50
                     time.sleep(0.15)
                 progress[status] = {"read": read, "total": total_count, "done": finished}
                 next_cursors[status] = -1 if finished else start
