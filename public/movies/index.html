@@ -65,7 +65,10 @@
   .home-link:hover { color: var(--accent); }
   body:not(.is-admin) #importBtn,
   body:not(.is-admin) #doubanImportBtn,
-  body:not(.is-admin) #updateBtn { display: none; }
+  body:not(.is-admin) #updateBtn,
+  body:not(.is-admin) #clearBtn { display: none; }
+  #clearBtn { color: #e05a4e; border-color: rgba(224, 90, 78, .55); }
+  #clearBtn:hover { color: #ff8b82; border-color: #e05a4e; }
   #loginBtn {
     color: #111;
     background: var(--accent);
@@ -144,6 +147,32 @@
     font-weight: 600;
   }
   .pager button:disabled { opacity: .35; cursor: default; }
+  .pager-gap {
+    min-width: 20px;
+    text-align: center;
+    color: var(--muted);
+    align-self: center;
+    letter-spacing: 1px;
+  }
+  .pager-jump {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px;
+  }
+  .pager-jump input {
+    width: 64px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 8px;
+    font-size: 13px;
+    text-align: center;
+    outline: none;
+  }
+  .pager-jump input:focus { border-color: var(--accent); }
+  .pager-jump button { min-width: 0; }
   .pager-info {
     width: 100%;
     text-align: center;
@@ -572,6 +601,7 @@
     <button id="doubanImportBtn" type="button">豆瓣导入</button>
     <button id="exportBtn" type="button">导出备份</button>
     <button id="importBtn" type="button">导入</button>
+    <button id="clearBtn" type="button">清空</button>
     <input type="file" id="importFile" accept=".json" style="display:none">
   </div>
 </header>
@@ -989,14 +1019,41 @@
     '</div>';
   }
 
+  /* pageNumbers */
+  function pageNumbers(pages, current) {
+    var keep = {};
+    function add(n) {
+      if (n >= 1 && n <= pages) keep[n] = true;
+    }
+    add(1);
+    add(pages);
+    add(current - 1);
+    add(current);
+    add(current + 1);
+    var nums = Object.keys(keep).map(Number).sort(function (a, b) { return a - b; });
+    var out = [];
+    nums.forEach(function (n, i) {
+      if (i > 0 && n - nums[i - 1] > 1) out.push("…");
+      out.push(n);
+    });
+    return out;
+  }
+  /* end pageNumbers */
+
   function pagerHtml(pages) {
     if (pages <= 1) return "";
-    var btns = '<button data-p="prev"' + (curPage === 1 ? " disabled" : "") + '>上一页</button>';
-    for (var i = 1; i <= pages; i++) {
-      btns += '<button data-p="' + i + '"' + (i === curPage ? ' class="active"' : "") + '>' + i + '</button>';
-    }
-    btns += '<button data-p="next"' + (curPage === pages ? " disabled" : "") + '>下一页</button>';
-    return '<div class="pager">' + btns + '</div>';
+    var html = '<div class="pager">';
+    html += '<button type="button" data-p="prev"' + (curPage === 1 ? " disabled" : "") + '>上一页</button>';
+    pageNumbers(pages, curPage).forEach(function (item) {
+      if (item === "…") html += '<span class="pager-gap">…</span>';
+      else html += '<button type="button" data-p="' + item + '"' + (item === curPage ? ' class="active"' : "") + '>' + item + '</button>';
+    });
+    html += '<button type="button" data-p="next"' + (curPage === pages ? " disabled" : "") + '>下一页</button>';
+    html += '<form class="pager-jump">' +
+      '<input type="number" min="1" max="' + pages + '" inputmode="numeric" placeholder="页码" aria-label="跳转页码">' +
+      '<button type="submit">跳转</button></form>';
+    html += '</div>';
+    return html;
   }
 
   // 根据现有片单动态生成 地区 / 类型 筛选项
@@ -1336,6 +1393,7 @@
     // 分页按钮
     var pagerBtn = e.target.closest(".pager button");
     if (pagerBtn) {
+      if (pagerBtn.closest(".pager-jump")) return;
       if (pagerBtn.disabled) return;
       var p = pagerBtn.getAttribute("data-p");
       var totalPages = Math.ceil(items.filter(match).length / PAGE_SIZE);
@@ -1386,12 +1444,30 @@
     });
   });
 
+  mainEl.addEventListener("submit", function (e) {
+    var form = e.target.closest(".pager-jump");
+    if (!form) return;
+    e.preventDefault();
+    var totalPages = Math.ceil(items.filter(match).length / PAGE_SIZE);
+    var n = parseInt(form.querySelector("input").value, 10);
+    if (!n || n < 1 || n > totalPages) {
+      toast("请输入 1 到 " + totalPages + " 之间的页码");
+      return;
+    }
+    curPage = n;
+    render();
+    window.scrollTo(0, 0);
+  });
+
   /* ==================== 通用确认弹窗（删除 / 重置共用） ==================== */
   var confirmMask = document.getElementById("confirmMask");
   var confirmText = document.getElementById("confirmText");
   var confirmAction = null;
 
-  function askConfirm(text, action) {
+  function askConfirm(text, action, options) {
+    options = options || {};
+    document.querySelector("#confirmMask h3").textContent = options.title || "删除确认";
+    document.getElementById("confirmOk").textContent = options.ok || "确认删除";
     confirmText.textContent = text;
     confirmAction = action;
     confirmMask.classList.add("show");
@@ -1400,13 +1476,16 @@
   function closeConfirm() {
     confirmMask.classList.remove("show");
     confirmAction = null;
+    document.querySelector("#confirmMask h3").textContent = "删除确认";
+    document.getElementById("confirmOk").textContent = "确认删除";
   }
 
   document.getElementById("confirmCancel").addEventListener("click", closeConfirm);
   confirmMask.addEventListener("click", function (e) { if (e.target === confirmMask) closeConfirm(); });
   document.getElementById("confirmOk").addEventListener("click", function () {
-    if (confirmAction) confirmAction();
+    var action = confirmAction;
     closeConfirm();
+    if (action) action();
   });
 
   function askDelete(item) {
@@ -1424,9 +1503,37 @@
     });
   }
 
+  document.getElementById("clearBtn").addEventListener("click", function () {
+    if (!mustAdmin()) return;
+    if (!items.length) { toast("片单已经是空的"); return; }
+    var total = items.length;
+    askConfirm(
+      "当前片单共 " + total + " 部。清空会从服务器删掉全部影片，访客也将看不到。请谨慎操作。",
+      function () {
+        askConfirm(
+          "再确认一次。清空后无法从页面恢复。如果还要这些片子，先点取消，用「导出备份」留一份。",
+          function () {
+            saving = true;
+            api("/api/movies", { method: "PUT", body: [] }).then(function (res) {
+              saving = false;
+              curPage = 1;
+              applyList(res);
+              toast("已清空 " + total + " 部");
+            }).catch(function (err) {
+              saving = false;
+              toast(err.message || "清空失败");
+            });
+          },
+          { title: "再次确认", ok: "确认清空" }
+        );
+      },
+      { title: "清空片单", ok: "继续" }
+    );
+  });
+
   // 重置筛选：所有筛选条件回到「全部」，不动数据
   document.getElementById("resetBtn").addEventListener("click", function () {
-    askConfirm("确定重置筛选吗？", function () {
+    askConfirm("确定重置筛选吗？不会删除片子。", function () {
       curStatus = "all"; curType = "all"; curRegion = "all"; curGenre = "all"; curDecade = "all";
       curSort = "year";
       curPage = 1; keyword = "";
@@ -1439,7 +1546,7 @@
       });
       render();
       toast("筛选已重置");
-    });
+    }, { title: "重置筛选", ok: "确认重置" });
   });
 
   /* ==================== 导出 / 导入 ==================== */
