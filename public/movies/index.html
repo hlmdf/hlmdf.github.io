@@ -503,6 +503,8 @@
   .btn-danger { background: #e05a4e; border: none; color: #fff; font-weight: 600; }
   .btn-danger:hover { filter: brightness(1.1); }
   .confirm-modal { max-width: 360px; }
+  #doubanImportMask .confirm-modal { max-width: 440px; }
+  #doubanImportStatus { white-space: pre-line; line-height: 1.7; }
   .confirm-text { color: var(--muted); font-size: 14px; line-height: 1.7; }
 
   /* 提示条 */
@@ -705,7 +707,7 @@
     <form id="doubanImportForm">
       <div class="form-item" style="margin-top:14px">
         <label>豆瓣个人主页</label>
-        <input id="doubanUser" placeholder="https://www.douban.com/people/你的ID/" autocomplete="off">
+        <input id="doubanUser" value="https://www.douban.com/people/194819170/" placeholder="https://www.douban.com/people/你的ID/" autocomplete="off">
       </div>
       <div class="status-toggle" id="doubanStatusPick" style="margin-top:14px">
         <button type="button" data-status="watched" class="active">看过</button>
@@ -1494,10 +1496,39 @@
     reader.readAsText(file);
   });
 
+  function importSummary(res) {
+    var lines = [];
+    function line(label, bucket) {
+      if (!bucket) return;
+      var watched = bucket.watched || 0;
+      var doing = bucket.doing || 0;
+      var want = bucket.want || 0;
+      var total = watched + doing + want;
+      if (!total) return;
+      var parts = [];
+      if (watched) parts.push("看过 " + watched);
+      if (doing) parts.push("在看 " + doing);
+      if (want) parts.push("想看 " + want);
+      lines.push(label + " " + total + "：" + parts.join("，"));
+    }
+    if (res.added) {
+      lines.push("新加 " + res.added + " 部");
+      line("电影", res.counts && res.counts.movie);
+      line("电视剧", res.counts && res.counts.tv);
+    } else {
+      lines.push("没有新的电影或电视剧");
+    }
+    if (res.skipped) lines.push("已有的 " + res.skipped + " 部已跳过");
+    if (res.more) lines.push("还有没导完的，再点一次");
+    return lines.join("\n");
+  }
+
   var doubanImportMask = document.getElementById("doubanImportMask");
   var doubanImportStatus = document.getElementById("doubanImportStatus");
+  var doubanUserInput = document.getElementById("doubanUser");
+  var DEFAULT_DOUBAN_USER = "https://www.douban.com/people/194819170/";
   var doubanCursors = {};
-  var doubanCursorUser = "";
+  var doubanCursorUser = DEFAULT_DOUBAN_USER;
   document.getElementById("doubanStatusPick").addEventListener("click", function (e) {
     var btn = e.target.closest("button");
     if (!btn) return;
@@ -1505,6 +1536,7 @@
   });
   document.getElementById("doubanImportBtn").addEventListener("click", function () {
     if (!mustAdmin()) return;
+    if (!doubanUserInput.value.trim()) doubanUserInput.value = DEFAULT_DOUBAN_USER;
     doubanImportStatus.textContent = "";
     doubanImportMask.classList.add("show");
     setTimeout(function () { document.getElementById("doubanUser").focus(); }, 50);
@@ -1519,7 +1551,7 @@
   document.getElementById("doubanImportForm").addEventListener("submit", function (e) {
     e.preventDefault();
     if (!mustAdmin()) return;
-    var user = document.getElementById("doubanUser").value.trim();
+    var user = doubanUserInput.value.trim();
     if (!user) { doubanImportStatus.textContent = "请填写豆瓣个人主页"; return; }
     var statusMap = { watched: "done", doing: "doing", want: "mark" };
     var statuses = [];
@@ -1542,11 +1574,9 @@
       document.getElementById("doubanImportSubmit").disabled = false;
       applyList(res);
       doubanCursors = res.cursors || {};
-      var message = res.added ? "已导入 " + res.added + " 部" : "没有新的电影或电视剧";
-      if (res.skipped) message += "，已有的 " + res.skipped + " 部已跳过";
-      if (res.more) message += "。还有没导完的，再点一次";
+      var message = importSummary(res);
       doubanImportStatus.textContent = message;
-      toast(message);
+      toast(res.added ? "新加 " + res.added + " 部" : "没有新的电影或电视剧");
     }).catch(function (err) {
       saving = false;
       document.getElementById("doubanImportSubmit").disabled = false;

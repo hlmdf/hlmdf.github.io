@@ -425,6 +425,18 @@ def fetch_douban_interests(uid, status, start):
     return data["interests"]
 
 
+def count_added(movies):
+    counts = {
+        "movie": {"watched": 0, "doing": 0, "want": 0},
+        "tv": {"watched": 0, "doing": 0, "want": 0},
+    }
+    for movie in movies:
+        kind = movie.get("type") if movie.get("type") in counts else "movie"
+        status = movie.get("status") if movie.get("status") in counts[kind] else "watched"
+        counts[kind][status] += 1
+    return counts
+
+
 def subject_id_of(movie):
     match = SUBJECT_RE.search(movie.get("douban") or "")
     return match.group(1) if match else ""
@@ -774,7 +786,7 @@ class Handler(SimpleHTTPRequestHandler):
                     next_cursors[status] = max(0, int(raw_cursors.get(status) or 0))
                 except (TypeError, ValueError):
                     next_cursors[status] = 0
-        added = 0
+        inserted = []
         with LOCK:
             try:
                 current = load_movies()
@@ -788,12 +800,13 @@ class Handler(SimpleHTTPRequestHandler):
                     continue
                 have.add(sid)
                 current.append(movie)
-                added += 1
-            if added:
+                inserted.append(movie)
+            if inserted:
                 save_movies(current)
         self.send_json({
             "ok": True,
-            "added": added,
+            "added": len(inserted),
+            "counts": count_added(inserted),
             "skipped": skipped,
             "more": more,
             "cursors": next_cursors,
