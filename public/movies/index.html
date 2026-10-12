@@ -345,7 +345,7 @@
     transition: opacity .2s;
   }
   .card:hover .douban-hint { opacity: 1; }
-  .empty-all { text-align: center; color: var(--muted); padding: 90px 0 40px; font-size: 15px; }
+  .empty-all { text-align: left; color: var(--muted); padding: 28px 0 24px; font-size: 15px; }
 
   /* ---------- 添加按钮 ---------- */
   .fab {
@@ -524,14 +524,18 @@
     right: 0;
     bottom: 0;
     z-index: 40;
-    text-align: center;
     color: var(--muted);
     font-size: 12px;
-    padding: 14px 24px;
     line-height: 1.8;
     background: rgba(15, 17, 23, 0.94);
     border-top: 1px solid var(--line);
     backdrop-filter: blur(8px);
+  }
+  footer .footer-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 12px 24px;
+    text-align: left;
   }
 
   @media (max-width: 640px) {
@@ -711,8 +715,10 @@
 </div>
 
 <footer>
-  片单存在服务器上，访客只能查看。换电脑前仍可以用「导出备份」留一份到本地<br>
-  搜索结果、封面与评分数据来自豆瓣
+  <div class="footer-inner">
+    片单存在服务器上，访客只能查看。换电脑前仍可以用「导出备份」留一份到本地<br>
+    搜索结果、封面与评分数据来自豆瓣
+  </div>
 </footer>
 
 <script>
