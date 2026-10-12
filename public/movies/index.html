@@ -1411,32 +1411,53 @@
 
   /* ==================== 豆瓣搜索 ==================== */
   // 依次尝试：自己服务器上的中转（最稳）→ 公共代理（国内网络下可能被拦）
+  function normalizeSuggest(data) {
+    if (Array.isArray(data)) return data;
+    var items = data && data.items;
+    if (!Array.isArray(items)) return [];
+    return items.map(function (item) {
+      var target = item && item.target;
+      var kind = item && item.target_type;
+      if (!target || !target.id || (kind !== "movie" && kind !== "tv")) return null;
+      return {
+        title: target.title || "",
+        year: target.year || "",
+        img: target.cover_url || "",
+        url: "https://movie.douban.com/subject/" + target.id + "/",
+        episode: kind === "tv" ? "1" : ""
+      };
+    }).filter(Boolean);
+  }
+
   function doubanSearch(kw) {
     var q = encodeURIComponent(kw);
-    var target = "https://movie.douban.com/j/subject_suggest?q=" + q;
+    var rexxar = "https://m.douban.com/rexxar/api/v2/search/movie?q=" + q + "&count=10";
     var sources = [
       apiOrigin() + "/api/suggest?q=" + q,
-      "https://api.allorigins.win/raw?url=" + encodeURIComponent(target),
-      "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(target),
-      "https://api.cors.lol/?url=" + encodeURIComponent(target)
+      "https://api.allorigins.win/raw?url=" + encodeURIComponent(rexxar),
+      "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(rexxar)
     ];
-    var chain = Promise.reject();
-    sources.forEach(function (url) {
-      chain = chain.catch(function () {
-        var controller = new AbortController();
-        var timer = setTimeout(function () { controller.abort(); }, 10000);
-        return fetch(url, { signal: controller.signal })
-          .then(function (resp) {
-            clearTimeout(timer);
-            if (!resp.ok) throw new Error("http " + resp.status);
-            return resp.json();
-          });
+    var index = 0;
+    function step() {
+      if (index >= sources.length) return Promise.resolve([]);
+      var url = sources[index];
+      index += 1;
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 10000);
+      return fetch(url, { signal: controller.signal }).then(function (resp) {
+        clearTimeout(timer);
+        if (!resp.ok) throw new Error("http " + resp.status);
+        return resp.json();
+      }).then(function (data) {
+        var list = normalizeSuggest(data);
+        if (!list.length) return step();
+        return list;
+      }).catch(function () {
+        clearTimeout(timer);
+        return step();
       });
-    });
-    return chain.then(function (data) {
-      if (!Array.isArray(data)) throw new Error("bad data");
-      return data;
-    });
+    }
+    return step();
   }
 
   var searchSeq = 0;
@@ -1711,7 +1732,27 @@
     if (item) openDetail(item);
   });
 
-  // 卡片右上角下拉：直接切换 看过 / 想看
+  function saveStatus(item, next, sync) {
+    var body = {};
+    Object.keys(item).forEach(function (key) { body[key] = item[key]; });
+    body.status = next;
+    body.syncDouban = !!sync;
+    saving = true;
+    api("/api/movies/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
+      saving = false;
+      applyList(res);
+      var note = "";
+      if (res.doubanSync && res.doubanSync.ok) note = "，已同步到豆瓣";
+      else if (res.doubanSync && res.doubanSync.ok === false) note = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+      toast("《" + item.title + "》已改为「" + statusName(next) + "」" + note, note.indexOf("没写进") === -1 ? 2200 : 4200);
+    }).catch(function (err) {
+      saving = false;
+      render();
+      toast(err.message || "修改失败");
+    });
+  }
+
+  // 卡片右上角下拉：切换看过 / 在看 / 想看，并同步到豆瓣
   mainEl.addEventListener("change", function (e) {
     var sel = e.target.closest(".status-select");
     if (!sel) return;
@@ -1721,18 +1762,31 @@
     if (!isAdmin || saving) { render(); return; }
     var next = sel.value;
     if (item.status === next) return;
-    var body = {};
-    Object.keys(item).forEach(function (key) { body[key] = item[key]; });
-    body.status = next;
-    saving = true;
-    api("/api/movies/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
-      saving = false;
-      applyList(res);
-      toast("《" + item.title + "》已改为「" + statusName(next) + "」");
-    }).catch(function (err) {
-      saving = false;
+    if (!doubanSubjectId(item.douban)) {
+      askConfirm("这部没有豆瓣链接，只会改这个页面，不会同步到豆瓣。", function () {
+        saveStatus(item, next, false);
+      }, { title: "无法同步", ok: "只改这里", okClass: "btn-save", onCancel: function () { render(); } });
+      return;
+    }
+    api("/api/douban/session").then(function (session) {
+      if (session.loggedIn) {
+        saveStatus(item, next, true);
+        return;
+      }
+      askConfirm("还没登录豆瓣。要把「" + statusName(next) + "」写进豆瓣，需要先登录。", function () {
+        pendingDoubanAdd = { kind: "status", item: item, next: next };
+        openDoubanLoginForAdd();
+      }, {
+        title: "同步到豆瓣",
+        ok: "登录并同步",
+        okClass: "btn-save",
+        alt: "只改这里",
+        altAction: function () { saveStatus(item, next, false); },
+        onCancel: function () { render(); }
+      });
+    }).catch(function () {
       render();
-      toast(err.message || "修改失败");
+      toast("没能确认豆瓣登录状态");
     });
   });
 
@@ -1756,6 +1810,7 @@
   var confirmText = document.getElementById("confirmText");
   var confirmAction = null;
   var confirmAltAction = null;
+  var confirmCancelAction = null;
 
   function askConfirm(text, action, options) {
     options = options || {};
@@ -1774,6 +1829,7 @@
     }
     confirmText.textContent = text;
     confirmAction = action;
+    confirmCancelAction = options.onCancel || null;
     confirmMask.classList.add("show");
   }
 
@@ -1781,6 +1837,7 @@
     confirmMask.classList.remove("show");
     confirmAction = null;
     confirmAltAction = null;
+    confirmCancelAction = null;
     document.querySelector("#confirmMask h3").textContent = "删除确认";
     var okBtn = document.getElementById("confirmOk");
     okBtn.textContent = "确认删除";
@@ -1788,8 +1845,17 @@
     document.getElementById("confirmAlt").style.display = "none";
   }
 
-  document.getElementById("confirmCancel").addEventListener("click", closeConfirm);
-  confirmMask.addEventListener("click", function (e) { if (e.target === confirmMask) closeConfirm(); });
+  document.getElementById("confirmCancel").addEventListener("click", function () {
+    var action = confirmCancelAction;
+    closeConfirm();
+    if (action) action();
+  });
+  confirmMask.addEventListener("click", function (e) {
+    if (e.target !== confirmMask) return;
+    var action = confirmCancelAction;
+    closeConfirm();
+    if (action) action();
+  });
   document.getElementById("confirmOk").addEventListener("click", function () {
     var action = confirmAction;
     closeConfirm();
@@ -2058,7 +2124,8 @@
       var pending = pendingDoubanAdd;
       pendingDoubanAdd = null;
       doubanImportMask.classList.remove("show");
-      postMovie(pending.data, true, pending.el);
+      if (pending.kind === "status") saveStatus(pending.item, pending.next, true);
+      else postMovie(pending.data, true, pending.el);
     }
   }
   document.getElementById("doubanImportBtn").addEventListener("click", function () {
@@ -2075,8 +2142,10 @@
   function closeDoubanImport() {
     doubanImportMask.classList.remove("show");
     if (pendingDoubanAdd) {
+      var wasStatus = pendingDoubanAdd.kind === "status";
       pendingDoubanAdd = null;
-      toast("这部还没加上");
+      if (wasStatus) render();
+      toast(wasStatus ? "没有修改" : "这部还没加上");
     }
   }
   document.getElementById("doubanImportCancel").addEventListener("click", function () {

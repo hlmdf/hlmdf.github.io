@@ -231,6 +231,40 @@ def new_id():
 SUBJECT_RE = re.compile(r"subject/(\d+)")
 
 
+def suggest_douban(keyword):
+    """豆瓣原来的 subject_suggest 现在直接返回空列表，改走移动端搜索。"""
+    url = "https://m.douban.com/rexxar/api/v2/search/movie?q=%s&count=10" % urllib.parse.quote(keyword)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": DOUBAN_UA,
+        "Referer": "https://m.douban.com/search/",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=10) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("豆瓣搜索没有结果")
+    out = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        target = item.get("target") if isinstance(item.get("target"), dict) else {}
+        kind = str(item.get("target_type") or "")
+        sid = str(target.get("id") or "")
+        if kind not in ("movie", "tv") or not sid.isdigit():
+            continue
+        out.append({
+            "title": target.get("title") or "",
+            "year": str(target.get("year") or ""),
+            "img": target.get("cover_url") or "",
+            "url": "https://movie.douban.com/subject/%s/" % sid,
+            "episode": "1" if kind == "tv" else "",
+        })
+        if len(out) >= 8:
+            break
+    return out
+
+
 def fetch_douban(subject_id):
     """豆瓣搜索接口没有分数，添加时再查一次影片摘要。"""
     url = "https://movie.douban.com/j/subject_abstract?subject_id=" + urllib.parse.quote(subject_id)
@@ -1100,17 +1134,23 @@ class Handler(SimpleHTTPRequestHandler):
             movie = enrich_movie(movie)
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 400)
+        sync = isinstance(body, dict) and body.get("syncDouban") is True
         with LOCK:
             try:
                 items = load_movies()
             except ValueError as exc:
                 return self.send_json({"error": str(exc)}, 500)
+            found = False
             for index, item in enumerate(items):
                 if item.get("id") == movie_id:
                     items[index] = movie
-                    save_movies(items)
-                    return self.send_json({"ok": True, "item": movie, "items": items})
-        self.send_json({"error": "没有这部片子"}, 404)
+                    found = True
+                    break
+            if not found:
+                return self.send_json({"error": "没有这部片子"}, 404)
+            save_movies(items)
+        douban_sync = self.sync_new_movie(movie) if sync else None
+        self.send_json({"ok": True, "item": movie, "items": items, "doubanSync": douban_sync})
 
     def handle_delete(self, movie_id):
         if not self.require_auth():
@@ -1507,22 +1547,10 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_suggest(self, keyword):
         if not keyword:
             return self.send_json([])
-        url = "https://movie.douban.com/j/subject_suggest?q=" + urllib.parse.quote(keyword)
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
+            out = suggest_douban(keyword)
         except Exception:
-            return self.send_json([])
-        if not isinstance(data, list):
-            return self.send_json([])
-        out = [{
-            "title": item.get("title", ""),
-            "year": item.get("year", ""),
-            "img": item.get("img", ""),
-            "url": item.get("url", ""),
-            "episode": item.get("episode", ""),
-        } for item in data if isinstance(item, dict)][:10]
+            return self.send_json({"error": "豆瓣搜索暂时没有回应"}, 502)
         self.send_json(out)
 
     def handle_img(self, url):
