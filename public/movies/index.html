@@ -1628,7 +1628,8 @@
     } else {
       lines.push("没有新的电影或电视剧");
     }
-    if (res.skipped) lines.push("已有的 " + res.skipped + " 部已跳过");
+    if (res.skipped) lines.push("片单里已有的 " + res.skipped + " 部已跳过");
+    if (res.duplicate) lines.push("豆瓣里有 " + res.duplicate + " 部重复记录，只保留了一条");
     if (res.more) lines.push("还有没导完的，正在继续");
     var note = progressNote(res.progress);
     if (note) lines.push(note);
@@ -1737,6 +1738,8 @@
     doubanImportStatus.textContent = "正在从豆瓣读取。看过和想看加起来有一千部左右，会分几次拉，请先别关这个窗口…";
     var added = 0;
     var skipped = 0;
+    var duplicate = 0;
+    var startedEmpty = items.length === 0;
     var counts = emptyCounts();
     var rounds = 0;
     function pull() {
@@ -1744,7 +1747,7 @@
       if (rounds > 40) {
         saving = false;
         document.getElementById("doubanImportSubmit").disabled = false;
-        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, counts: counts, more: true });
+        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, duplicate: duplicate, counts: counts, more: true });
         toast(added ? "新加 " + added + " 部" : "还没有导完");
         return;
       }
@@ -1754,7 +1757,14 @@
       }).then(function (res) {
         applyList(res);
         added += res.added || 0;
-        skipped += res.skipped || 0;
+        var batchSkipped = res.skipped || 0;
+        var batchDuplicate = res.duplicate || 0;
+        if (startedEmpty) {
+          batchDuplicate += batchSkipped;
+          batchSkipped = 0;
+        }
+        skipped += batchSkipped;
+        duplicate += batchDuplicate;
         mergeCounts(counts, res.counts);
         doubanCursors = res.cursors || {};
         var keepGoing = res.more || importStillShort(res);
@@ -1765,7 +1775,7 @@
         }
         saving = false;
         document.getElementById("doubanImportSubmit").disabled = false;
-        var summary = { added: added, skipped: skipped, counts: counts, more: false, progress: res.progress };
+        var summary = { added: added, skipped: skipped, duplicate: duplicate, counts: counts, more: false, progress: res.progress };
         doubanImportStatus.textContent = importSummary(summary);
         toast(added ? "新加 " + added + " 部" : "没有新的电影或电视剧");
       }).catch(function (err) {

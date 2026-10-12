@@ -743,8 +743,10 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError as exc:
                 return self.send_json({"error": str(exc)}, 500)
         seen = {sid for sid in (subject_id_of(movie) for movie in current) if sid}
+        already_ids = set(seen)
         fresh = []
         skipped = 0
+        duplicate = 0
         more = False
         next_cursors = {}
         progress = {}
@@ -783,8 +785,10 @@ class Handler(SimpleHTTPRequestHandler):
                             continue
                         sid = subject_id_of(movie)
                         if not sid or sid in seen:
-                            if sid in seen:
+                            if sid in already_ids:
                                 skipped += 1
+                            elif sid in seen:
+                                duplicate += 1
                             continue
                         seen.add(sid)
                         fresh.append(movie)
@@ -823,7 +827,10 @@ class Handler(SimpleHTTPRequestHandler):
             for movie in fresh:
                 sid = subject_id_of(movie)
                 if sid in have:
-                    skipped += 1
+                    if sid in already_ids:
+                        skipped += 1
+                    else:
+                        duplicate += 1
                     continue
                 have.add(sid)
                 current.append(movie)
@@ -835,6 +842,7 @@ class Handler(SimpleHTTPRequestHandler):
             "added": len(inserted),
             "counts": count_added(inserted),
             "skipped": skipped,
+            "duplicate": duplicate,
             "more": more,
             "progress": progress,
             "cursors": next_cursors,
