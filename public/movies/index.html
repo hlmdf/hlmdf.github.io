@@ -652,6 +652,11 @@
   #doubanImportStatus, #doubanLoginStatus { white-space: pre-line; line-height: 1.7; }
   .douban-captcha { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
   .douban-captcha img { height: 40px; border-radius: 6px; background: #fff; }
+  .douban-code-row { display: flex; gap: 8px; }
+  .douban-code-row input { flex: 1; min-width: 0; }
+  .douban-code-row button { white-space: nowrap; padding: 9px 12px; }
+  #doubanMode { margin-top: 14px; }
+  #doubanMode button.active { border-color: var(--accent); color: var(--accent); }
   .confirm-text { color: var(--muted); font-size: 14px; line-height: 1.7; }
 
   /* 提示条 */
@@ -854,15 +859,34 @@
 <div class="modal-mask" id="doubanImportMask">
   <div class="modal confirm-modal">
     <h3>从豆瓣导入</h3>
-    <p class="confirm-text">要登录你的豆瓣账号，才能读到登录后才看得到的片子。密码只用来登录，不会写进片单。</p>
+    <p class="confirm-text">要登录你的豆瓣账号，才能读到登录后才看得到的片子。密码和短信验证码只用来登录，不会写进片单。</p>
+    <div class="status-toggle" id="doubanMode">
+      <button type="button" data-mode="phone" class="active">手机验证码</button>
+      <button type="button" data-mode="password">账号密码</button>
+    </div>
     <form id="doubanLoginForm">
-      <div class="form-item" style="margin-top:14px">
-        <label>豆瓣账号</label>
-        <input id="doubanAccount" placeholder="手机号或邮箱" autocomplete="username">
+      <div id="doubanPhonePane">
+        <div class="form-item">
+          <label>手机号</label>
+          <input id="doubanPhone" placeholder="11位手机号" inputmode="numeric" autocomplete="tel">
+        </div>
+        <div class="form-item">
+          <label>短信验证码</label>
+          <div class="douban-code-row">
+            <input id="doubanSms" placeholder="短信验证码" inputmode="numeric" autocomplete="one-time-code">
+            <button type="button" class="btn-cancel" id="doubanSendCode">获取验证码</button>
+          </div>
+        </div>
       </div>
-      <div class="form-item">
-        <label>豆瓣密码</label>
-        <input id="doubanPassword" type="password" placeholder="豆瓣密码" autocomplete="current-password">
+      <div id="doubanPasswordPane" style="display:none">
+        <div class="form-item">
+          <label>豆瓣账号</label>
+          <input id="doubanAccount" placeholder="手机号或邮箱" autocomplete="username">
+        </div>
+        <div class="form-item">
+          <label>豆瓣密码</label>
+          <input id="doubanPassword" type="password" placeholder="豆瓣密码" autocomplete="current-password">
+        </div>
       </div>
       <div class="douban-captcha" id="doubanCaptchaBox" style="display:none">
         <img id="doubanCaptchaImg" alt="验证码">
@@ -1901,6 +1925,20 @@
   var doubanLoginStatus = document.getElementById("doubanLoginStatus");
   var doubanCursors = {};
   var doubanCaptchaId = "";
+  var doubanMode = "phone";
+  var doubanTicket = { ticket: "", randstr: "", tcAppId: "" };
+  var doubanCodeTimer = 0;
+  document.getElementById("doubanMode").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    doubanMode = btn.getAttribute("data-mode") === "password" ? "password" : "phone";
+    document.querySelectorAll("#doubanMode button").forEach(function (item) {
+      item.classList.toggle("active", item === btn);
+    });
+    document.getElementById("doubanPhonePane").style.display = doubanMode === "phone" ? "" : "none";
+    document.getElementById("doubanPasswordPane").style.display = doubanMode === "password" ? "" : "none";
+    doubanLoginStatus.textContent = "";
+  });
   document.getElementById("doubanStatusPick").addEventListener("click", function (e) {
     var btn = e.target.closest("button");
     if (!btn) return;
@@ -1923,7 +1961,7 @@
     doubanImportMask.classList.add("show");
     api("/api/douban/session").then(function (res) {
       if (res.loggedIn) showDoubanReady(res.uid);
-      else document.getElementById("doubanAccount").focus();
+      else document.getElementById(doubanMode === "phone" ? "doubanPhone" : "doubanAccount").focus();
     }).catch(function () {});
   });
   document.getElementById("doubanImportCancel").addEventListener("click", function () {
@@ -1933,35 +1971,151 @@
   doubanImportMask.addEventListener("click", function (e) {
     if (e.target === doubanImportMask && !saving) doubanImportMask.classList.remove("show");
   });
-  document.getElementById("doubanLoginForm").addEventListener("submit", function (e) {
-    e.preventDefault();
-    if (!mustAdmin() || saving) return;
-    var account = document.getElementById("doubanAccount").value.trim();
-    var password = document.getElementById("doubanPassword").value;
-    var captcha = document.getElementById("doubanCaptcha").value.trim();
-    if (!account || !password) { doubanLoginStatus.textContent = "请填写豆瓣账号和密码"; return; }
-    if (doubanCaptchaId && !captcha) { doubanLoginStatus.textContent = "请填写验证码"; return; }
-    saving = true;
-    document.getElementById("doubanLoginBtn").disabled = true;
-    doubanLoginStatus.textContent = "正在登录豆瓣…";
-    api("/api/douban/login", {
-      method: "POST",
-      body: { account: account, password: password, captchaId: doubanCaptchaId, captcha: captcha }
-    }).then(function (res) {
-      saving = false;
-      document.getElementById("doubanLoginBtn").disabled = false;
+  function doubanPhone() {
+    return document.getElementById("doubanPhone").value.replace(/\s/g, "");
+  }
+  function doubanAuthBody(extra) {
+    var body = Object.assign({}, extra);
+    if (doubanTicket.ticket) {
+      body.ticket = doubanTicket.ticket;
+      body.randstr = doubanTicket.randstr;
+      body.tcAppId = doubanTicket.tcAppId;
+    }
+    if (doubanCaptchaId) {
+      body.captchaId = doubanCaptchaId;
+      body.captcha = document.getElementById("doubanCaptcha").value.trim();
+    }
+    return body;
+  }
+  function showDoubanSlider(url, appId) {
+    return new Promise(function (resolve, reject) {
+      if (!/^https:\/\/([\w-]+\.)+(qq|tencent|qcloud)\.com(\/|$)/.test(url) || !/^\d{4,20}$/.test(appId)) {
+        reject(new Error("豆瓣验证码没有加载出来"));
+        return;
+      }
+      function open() {
+        try {
+          var widget = new TencentCaptcha(appId, function (result) {
+            if (result && result.ret === 0 && result.ticket) {
+              doubanTicket = { ticket: result.ticket, randstr: result.randstr || "", tcAppId: appId };
+              resolve();
+            } else {
+              reject(new Error("滑动验证没有完成"));
+            }
+          });
+          widget.show();
+        } catch (err) {
+          reject(new Error("豆瓣验证码没有加载出来"));
+        }
+      }
+      if (window.TencentCaptcha) { open(); return; }
+      var script = document.createElement("script");
+      script.src = url;
+      script.onload = open;
+      script.onerror = function () { reject(new Error("豆瓣验证码没有加载出来")); };
+      document.body.appendChild(script);
+    });
+  }
+  function doubanCall(path, body, attempt) {
+    return api(path, { method: "POST", body: doubanAuthBody(body) }).then(function (res) {
+      if (res.needCaptcha && res.captchaKind === "slider") {
+        doubanTicket = { ticket: "", randstr: "", tcAppId: "" };
+        if ((attempt || 0) >= 2) throw new Error("滑动验证没有通过，请再试一次");
+        doubanLoginStatus.textContent = "请完成滑动验证";
+        return showDoubanSlider(res.touchCapUrl, res.tcAppId).then(function () {
+          return doubanCall(path, body, (attempt || 0) + 1);
+        });
+      }
+      doubanTicket = { ticket: "", randstr: "", tcAppId: "" };
       if (res.needCaptcha) {
         doubanCaptchaId = res.captchaId || "";
         document.getElementById("doubanCaptchaBox").style.display = "flex";
         document.getElementById("doubanCaptchaImg").src = res.captchaImage || "";
         document.getElementById("doubanCaptcha").value = "";
-        doubanLoginStatus.textContent = "请填写验证码";
+        doubanLoginStatus.textContent = "请填写图中的验证码，然后再点一次";
         document.getElementById("doubanCaptcha").focus();
-        return;
+        return res;
       }
       doubanCaptchaId = "";
       document.getElementById("doubanCaptchaBox").style.display = "none";
+      return res;
+    });
+  }
+  function startSmsCountdown() {
+    var btn = document.getElementById("doubanSendCode");
+    var left = 60;
+    if (doubanCodeTimer) clearInterval(doubanCodeTimer);
+    btn.disabled = true;
+    btn.textContent = left + " 秒";
+    doubanCodeTimer = setInterval(function () {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(doubanCodeTimer);
+        doubanCodeTimer = 0;
+        btn.disabled = false;
+        btn.textContent = "获取验证码";
+        return;
+      }
+      btn.textContent = left + " 秒";
+    }, 1000);
+  }
+  document.getElementById("doubanSendCode").addEventListener("click", function () {
+    if (!mustAdmin() || saving) return;
+    var phone = doubanPhone();
+    if (!/^1[3-9]\d{9}$/.test(phone)) { doubanLoginStatus.textContent = "请填写11位手机号"; return; }
+    if (doubanCaptchaId && !document.getElementById("doubanCaptcha").value.trim()) {
+      doubanLoginStatus.textContent = "请填写图中的验证码";
+      return;
+    }
+    saving = true;
+    document.getElementById("doubanSendCode").disabled = true;
+    doubanLoginStatus.textContent = "正在向豆瓣发送验证码…";
+    doubanCall("/api/douban/phone-code", { areaCode: "+86", phone: phone }).then(function (res) {
+      saving = false;
+      if (res && res.needCaptcha) {
+        document.getElementById("doubanSendCode").disabled = false;
+        return;
+      }
+      doubanLoginStatus.textContent = "验证码已发送，请填写短信里的数字";
+      startSmsCountdown();
+    }).catch(function (err) {
+      saving = false;
+      document.getElementById("doubanSendCode").disabled = false;
+      document.getElementById("doubanSendCode").textContent = "获取验证码";
+      doubanLoginStatus.textContent = err.message || "验证码发送失败";
+    });
+  });
+  document.getElementById("doubanLoginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!mustAdmin() || saving) return;
+    var path = "/api/douban/login";
+    var body;
+    if (doubanMode === "phone") {
+      var phone = doubanPhone();
+      var code = document.getElementById("doubanSms").value.trim();
+      if (!/^1[3-9]\d{9}$/.test(phone)) { doubanLoginStatus.textContent = "请填写11位手机号"; return; }
+      if (!/^\d{4,8}$/.test(code)) { doubanLoginStatus.textContent = "请填写短信验证码"; return; }
+      path = "/api/douban/phone-login";
+      body = { areaCode: "+86", phone: phone, code: code };
+    } else {
+      var account = document.getElementById("doubanAccount").value.trim();
+      var password = document.getElementById("doubanPassword").value;
+      if (!account || !password) { doubanLoginStatus.textContent = "请填写豆瓣账号和密码"; return; }
+      body = { account: account, password: password };
+    }
+    if (doubanCaptchaId && !document.getElementById("doubanCaptcha").value.trim()) {
+      doubanLoginStatus.textContent = "请填写图中的验证码";
+      return;
+    }
+    saving = true;
+    document.getElementById("doubanLoginBtn").disabled = true;
+    doubanLoginStatus.textContent = "正在登录豆瓣…";
+    doubanCall(path, body).then(function (res) {
+      saving = false;
+      document.getElementById("doubanLoginBtn").disabled = false;
+      if (!res || res.needCaptcha) return;
       document.getElementById("doubanPassword").value = "";
+      document.getElementById("doubanSms").value = "";
       doubanLoginStatus.textContent = "";
       showDoubanReady(res.uid);
     }).catch(function (err) {

@@ -39,7 +39,9 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 DATA_PATH = os.path.join(BASE, "movies.json")
 DOUBAN_SESSION_PATH = os.path.join(BASE, "douban_session.json")
+DOUBAN_PENDING_PATH = os.path.join(BASE, "douban_pending.json")
 LOCK = threading.Lock()
+DOUBAN_LOCK = threading.Lock()
 FAILS = {}
 TOKEN_TTL = 30 * 24 * 3600
 BLOCKED = {
@@ -51,6 +53,7 @@ BLOCKED = {
     "key.pem",
     "server.py",
     "douban_session.json",
+    "douban_pending.json",
 }
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -482,6 +485,197 @@ def clear_douban_session():
         os.remove(DOUBAN_SESSION_PATH)
 
 
+def write_secret_json(path, payload):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def load_pending_cookies():
+    if not os.path.exists(DOUBAN_PENDING_PATH):
+        return {}
+    try:
+        with open(DOUBAN_PENDING_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    try:
+        saved_at = int(data.get("saved_at") or 0)
+    except (TypeError, ValueError):
+        saved_at = 0
+    if int(time.time()) - saved_at > 1800:
+        return {}
+    cookies = data.get("cookies")
+    if not isinstance(cookies, dict):
+        return {}
+    clean = {}
+    for name, value in cookies.items():
+        if isinstance(name, str) and isinstance(value, str) and 0 < len(name) <= 64 and len(value) <= 4000:
+            clean[name] = value
+    return clean
+
+
+def save_pending_cookies(cookies):
+    write_secret_json(DOUBAN_PENDING_PATH, {"cookies": cookies, "saved_at": int(time.time())})
+
+
+def clear_pending_cookies():
+    if os.path.exists(DOUBAN_PENDING_PATH):
+        os.remove(DOUBAN_PENDING_PATH)
+
+
+TOUCH_CAP_RE = re.compile(r"^https://([\w-]+\.)+(qq|tencent|qcloud)\.com(/|$)")
+PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+AREA_RE = re.compile(r"^\+\d{1,4}$")
+
+
+def douban_form_headers():
+    return {
+        "User-Agent": DOUBAN_UA,
+        "Origin": "https://accounts.douban.com",
+        "Referer": "https://accounts.douban.com/passport/login",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+
+def begin_douban_opener():
+    with DOUBAN_LOCK:
+        cookies = load_pending_cookies()
+    opener, jar = opener_from_cookies(cookies)
+    if not jar_dict(jar).get("bid"):
+        try:
+            opener.open(urllib.request.Request(
+                "https://accounts.douban.com/passport/login",
+                headers={"User-Agent": DOUBAN_UA},
+            ), timeout=15).read()
+        except Exception:
+            pass
+    return opener, jar
+
+
+def douban_post(path, fields):
+    opener, jar = begin_douban_opener()
+    body = {"ck": jar_dict(jar).get("ck") or ""}
+    body.update(fields)
+    req = urllib.request.Request(
+        "https://accounts.douban.com/j/mobile/" + path,
+        data=urllib.parse.urlencode(body).encode("utf-8"),
+        headers=douban_form_headers(),
+    )
+    try:
+        with opener.open(req, timeout=20) as response:
+            raw = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+    except Exception:
+        raise ValueError("豆瓣暂时没有回应")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    updated = jar_dict(jar)
+    with DOUBAN_LOCK:
+        save_pending_cookies(updated)
+    return data, updated, opener
+
+
+def ticket_fields(body):
+    ticket = text_of(body.get("ticket"), 2048)
+    randstr = text_of(body.get("randstr"), 128)
+    app_id = text_of(body.get("tcAppId"), 20)
+    if ticket and randstr and re.fullmatch(r"\d{4,20}", app_id):
+        return {"ticket": ticket, "randstr": randstr, "tc_app_id": app_id}
+    return {}
+
+
+def phone_parts(body):
+    area = text_of(body.get("areaCode"), 6) or "+86"
+    number = re.sub(r"\s+", "", text_of(body.get("phone"), 20))
+    if not AREA_RE.fullmatch(area):
+        raise ValueError("区号不对")
+    if area == "+86":
+        if not PHONE_RE.fullmatch(number):
+            raise ValueError("请填写11位手机号")
+    elif not re.fullmatch(r"\d{6,15}", number):
+        raise ValueError("手机号不对")
+    return area, number
+
+
+def douban_captcha_image(opener, url):
+    url = str(url or "")
+    if url.startswith("//"):
+        url = "https:" + url
+    elif url.startswith("/"):
+        url = "https://accounts.douban.com" + url
+    host = urllib.parse.urlparse(url).netloc.lower()
+    if not url.startswith("http") or not (host.endswith("douban.com") or host.endswith("doubanio.com")):
+        return ""
+    try:
+        with opener.open(urllib.request.Request(url, headers={
+            "User-Agent": DOUBAN_UA,
+            "Referer": "https://accounts.douban.com/passport/login",
+        }), timeout=15) as response:
+            data = response.read()
+            ctype = (response.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip().lower()
+    except Exception:
+        return ""
+    if not data or len(data) > 200000 or not ctype.startswith("image/"):
+        return ""
+    return "data:%s;base64,%s" % (ctype, base64.b64encode(data).decode("ascii"))
+
+
+def captcha_challenge(data, opener):
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+    message = str(data.get("message") or "")
+    image_url = str(payload.get("captcha_image_url") or "")
+    if message != "captcha_required" and not image_url and not payload.get("touch_cap_url"):
+        return None
+    url = str(payload.get("touch_cap_url") or "")
+    app_id = str(payload.get("tc_app_id") or "")
+    if TOUCH_CAP_RE.match(url) and re.fullmatch(r"\d{4,20}", app_id):
+        return {
+            "ok": False,
+            "needCaptcha": True,
+            "captchaKind": "slider",
+            "touchCapUrl": url,
+            "tcAppId": app_id,
+        }
+    image = douban_captcha_image(opener, image_url) if image_url else ""
+    if image:
+        return {
+            "ok": False,
+            "needCaptcha": True,
+            "captchaKind": "image",
+            "captchaId": payload.get("captcha_id") or "",
+            "captchaImage": image,
+        }
+    if image_url:
+        return {"error": "豆瓣验证码没有加载出来", "code": 502}
+    return {"error": douban_error_text(data), "code": 400}
+
+
+def complete_douban_login(cookies):
+    if not uid_from_cookies(cookies):
+        return ""
+    if not douban_session_ok(cookies):
+        raise ValueError("豆瓣没有登录成功")
+    uid = save_douban_session(cookies)
+    clear_pending_cookies()
+    return uid
+
+
 def douban_session_ok(cookies):
     opener, _jar = opener_from_cookies(cookies, follow_redirect=False)
     req = urllib.request.Request("https://www.douban.com/settings/", headers={"User-Agent": DOUBAN_UA})
@@ -676,6 +870,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self.handle_login()
         if path == "/api/douban/login":
             return self.handle_douban_login()
+        if path == "/api/douban/phone-code":
+            return self.handle_douban_phone_code()
+        if path == "/api/douban/phone-login":
+            return self.handle_douban_phone_login()
         if path == "/api/douban/logout":
             return self.handle_douban_logout()
         if path == "/api/movies/fill-ratings" or path == "/api/movies/refresh":
@@ -912,24 +1110,17 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_auth():
             return
         clear_douban_session()
+        clear_pending_cookies()
         self.send_json({"ok": True})
 
-    def douban_captcha_image(self, opener, url):
-        url = str(url or "")
-        if url.startswith("//"):
-            url = "https:" + url
-        host = urllib.parse.urlparse(url).netloc.lower()
-        if not url.startswith("http") or not (host.endswith("douban.com") or host.endswith("doubanio.com")):
-            return ""
+    def reply_douban_auth(self, data, cookies):
         try:
-            with opener.open(urllib.request.Request(url, headers={"User-Agent": DOUBAN_UA}), timeout=15) as response:
-                data = response.read()
-                ctype = (response.headers.get("Content-Type") or "image/jpeg").split(";")[0]
-        except Exception:
-            return ""
-        if not data or len(data) > 200000:
-            return ""
-        return "data:%s;base64,%s" % (ctype or "image/jpeg", base64.b64encode(data).decode("ascii"))
+            uid = complete_douban_login(cookies)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 502)
+        if not uid:
+            return self.send_json({"error": douban_error_text(data)}, 400)
+        self.send_json({"ok": True, "uid": uid})
 
     def handle_douban_login(self):
         if not self.require_auth():
@@ -947,71 +1138,83 @@ class Handler(SimpleHTTPRequestHandler):
         captcha_solution = text_of(body.get("captcha"), 20)
         if not account or not password:
             return self.send_json({"error": "请填写豆瓣账号和密码"}, 400)
-        opener, jar = opener_from_cookies({})
-        try:
-            opener.open(urllib.request.Request(
-                "https://accounts.douban.com/passport/login",
-                headers={"User-Agent": DOUBAN_UA},
-            ), timeout=15).read()
-        except Exception:
-            pass
-        fields = {
-            "ck": "",
-            "name": account,
-            "password": password,
-            "remember": "true",
-            "ticket": "",
-        }
+        fields = {"name": account, "password": password, "remember": "true"}
+        fields.update(ticket_fields(body))
         if captcha_id and captcha_solution:
             fields["captcha_id"] = captcha_id
             fields["captcha_solution"] = captcha_solution
-        req = urllib.request.Request(
-            "https://accounts.douban.com/j/mobile/login/basic",
-            data=urllib.parse.urlencode(fields).encode("utf-8"),
-            headers={
-                "User-Agent": DOUBAN_UA,
-                "Origin": "https://accounts.douban.com",
-                "Referer": "https://accounts.douban.com/passport/login",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json",
-                "X-Requested-With": "XMLHttpRequest",
-            },
-        )
         try:
-            with opener.open(req, timeout=20) as response:
-                raw = response.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", "replace")
-        except Exception:
-            return self.send_json({"error": "豆瓣暂时没有回应"}, 502)
-        try:
-            data = json.loads(raw)
-        except ValueError:
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
-        payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
-        message = str(data.get("message") or "")
-        if message == "captcha_required" or payload.get("captcha_image_url"):
-            image = self.douban_captcha_image(opener, payload.get("captcha_image_url") or "")
-            if not image:
-                return self.send_json({"error": "豆瓣验证码没有加载出来"}, 502)
-            return self.send_json({
-                "ok": False,
-                "needCaptcha": True,
-                "captchaId": payload.get("captcha_id") or "",
-                "captchaImage": image,
-            })
-        cookies = jar_dict(jar)
-        if not uid_from_cookies(cookies):
-            return self.send_json({"error": douban_error_text(data)}, 400)
-        try:
-            if not douban_session_ok(cookies):
-                return self.send_json({"error": "豆瓣没有登录成功"}, 400)
-            uid = save_douban_session(cookies)
+            data, cookies, opener = douban_post("login/basic", fields)
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 502)
-        self.send_json({"ok": True, "uid": uid})
+        challenge = captcha_challenge(data, opener)
+        if challenge:
+            if challenge.get("error"):
+                return self.send_json({"error": challenge["error"]}, challenge.get("code") or 400)
+            return self.send_json(challenge)
+        self.reply_douban_auth(data, cookies)
+
+    def handle_douban_phone_code(self):
+        if not self.require_auth():
+            return
+        try:
+            body = self.read_json()
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        if not isinstance(body, dict):
+            return self.send_json({"error": "格式不对"}, 400)
+        try:
+            area, number = phone_parts(body)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        fields = {"area_code": area, "number": number, "analytics": "analytics_log"}
+        fields.update(ticket_fields(body))
+        captcha_id = text_of(body.get("captchaId"), 80)
+        captcha_solution = text_of(body.get("captcha"), 20)
+        if captcha_id and captcha_solution:
+            fields["captcha_id"] = captcha_id
+            fields["captcha_solution"] = captcha_solution
+        try:
+            data, _cookies, opener = douban_post("login/request_phone_code", fields)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 502)
+        challenge = captcha_challenge(data, opener)
+        if challenge:
+            if challenge.get("error"):
+                return self.send_json({"error": challenge["error"]}, challenge.get("code") or 400)
+            return self.send_json(challenge)
+        if str(data.get("status") or "") == "success":
+            return self.send_json({"ok": True, "sent": True})
+        self.send_json({"error": douban_error_text(data)}, 400)
+
+    def handle_douban_phone_login(self):
+        if not self.require_auth():
+            return
+        try:
+            body = self.read_json()
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        if not isinstance(body, dict):
+            return self.send_json({"error": "格式不对"}, 400)
+        try:
+            area, number = phone_parts(body)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        code = text_of(body.get("code"), 8)
+        if not re.fullmatch(r"\d{4,8}", code):
+            return self.send_json({"error": "请填写短信验证码"}, 400)
+        fields = {"area_code": area, "number": number, "code": code}
+        fields.update(ticket_fields(body))
+        try:
+            data, cookies, opener = douban_post("login/verify_phone_code", fields)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 502)
+        challenge = captcha_challenge(data, opener)
+        if challenge:
+            if challenge.get("error"):
+                return self.send_json({"error": challenge["error"]}, challenge.get("code") or 400)
+            return self.send_json(challenge)
+        self.reply_douban_auth(data, cookies)
 
     def handle_import_douban(self):
         if not self.require_auth():

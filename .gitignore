@@ -39,6 +39,7 @@ yarn-error.log*
 /tools/movie-tracker/movies.json.bak
 /tools/movie-tracker/movies.json.tmp
 /tools/movie-tracker/douban_session.json
+/tools/movie-tracker/douban_pending.json
 /tools/movie-tracker/__pycache__/
 
 # vercel
