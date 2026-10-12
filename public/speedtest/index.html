@@ -123,14 +123,14 @@
             position: absolute;
             top: 50%;
             left: 50%;
-            width: 8.5rem;
+            width: 7.5rem;
             transform: translate(-50%, -50%);
             text-align: center;
             pointer-events: none;
         }
 
         .speed-number {
-            font-size: 2.35rem;
+            font-size: 1.7rem;
             font-weight: 700;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             -webkit-background-clip: text;
@@ -141,17 +141,14 @@
         }
 
         .speed-unit {
-            font-size: 1.2rem;
+            font-size: 0.8rem;
             color: #888;
-            font-weight: 300;
-            margin-top: 5px;
+            font-weight: 400;
+            margin-top: 2px;
         }
 
         .speed-sub {
-            font-size: 0.9rem;
-            color: #666;
-            margin-top: 4px;
-            min-height: 1.2em;
+            display: none;
         }
 
         .stat-sub {
@@ -405,7 +402,7 @@
             }
 
             .speed-number {
-                font-size: 2rem;
+                font-size: 1.45rem;
             }
 
             .test-btn {
@@ -636,7 +633,7 @@
                 this.ctx = ctx;
                 this.centerX = canvas.width / 2;
                 this.centerY = canvas.height / 2;
-                this.radius = Math.min(this.centerX, this.centerY) - 20;
+                this.radius = Math.min(this.centerX, this.centerY) - 46;
             }
 
             draw(value, ceiling) {
@@ -688,8 +685,8 @@
                     ctx.stroke();
 
                     const label = formatTick(max * i / 4);
-                    const lx = centerX + Math.cos(angle) * (radius - 50);
-                    const ly = centerY + Math.sin(angle) * (radius - 50);
+                    const lx = centerX + Math.cos(angle) * (radius + 24);
+                    const ly = centerY + Math.sin(angle) * (radius + 24);
                     ctx.fillText(label, lx, ly);
                 }
             }
