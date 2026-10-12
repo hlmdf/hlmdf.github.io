@@ -422,7 +422,11 @@ def fetch_douban_interests(uid, status, start):
         raise ValueError("豆瓣暂时没有回应")
     if not isinstance(data, dict) or not isinstance(data.get("interests"), list):
         raise ValueError("豆瓣返回的内容无法识别")
-    return data["interests"]
+    try:
+        total = int(data.get("total") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    return data["interests"], max(0, total)
 
 
 def count_added(movies):
@@ -743,20 +747,28 @@ class Handler(SimpleHTTPRequestHandler):
         skipped = 0
         more = False
         next_cursors = {}
-        deadline = time.time() + 40
+        progress = {}
+        deadline = time.time() + 45
         try:
             for status in statuses:
+                raw = raw_cursors.get(status, 0)
+                if raw == -1 or raw == "-1":
+                    next_cursors[status] = -1
+                    continue
                 try:
-                    start = max(0, int(raw_cursors.get(status) or 0))
+                    start = max(0, int(raw or 0))
                 except (TypeError, ValueError):
                     start = 0
                 finished = False
+                read = start
+                total_count = 0
                 while True:
                     if time.time() > deadline or len(fresh) >= 2000:
                         break
-                    interests = fetch_douban_interests(uid, status, start)
+                    interests, total_count = fetch_douban_interests(uid, status, start)
                     if not interests:
                         finished = True
+                        read = total_count or read
                         break
                     for interest in interests:
                         movie = interest_to_movie(interest)
@@ -769,23 +781,30 @@ class Handler(SimpleHTTPRequestHandler):
                             continue
                         seen.add(sid)
                         fresh.append(movie)
+                    read = start + len(interests)
                     if len(interests) < 50:
                         finished = True
                         break
                     start += 50
-                    time.sleep(0.25)
-                next_cursors[status] = 0 if finished else start
+                    time.sleep(0.15)
+                progress[status] = {"read": read, "total": total_count, "done": finished}
+                next_cursors[status] = -1 if finished else start
                 if not finished:
                     more = True
                     break
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 502)
         for status in statuses:
-            if status not in next_cursors:
-                try:
-                    next_cursors[status] = max(0, int(raw_cursors.get(status) or 0))
-                except (TypeError, ValueError):
-                    next_cursors[status] = 0
+            if status in next_cursors:
+                continue
+            raw = raw_cursors.get(status, 0)
+            if raw == -1 or raw == "-1":
+                next_cursors[status] = -1
+                continue
+            try:
+                next_cursors[status] = max(0, int(raw or 0))
+            except (TypeError, ValueError):
+                next_cursors[status] = 0
         inserted = []
         with LOCK:
             try:
@@ -809,6 +828,7 @@ class Handler(SimpleHTTPRequestHandler):
             "counts": count_added(inserted),
             "skipped": skipped,
             "more": more,
+            "progress": progress,
             "cursors": next_cursors,
             "items": current,
         })

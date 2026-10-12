@@ -215,7 +215,7 @@
   /* ---------- 卡片网格 ---------- */
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 20px;
     margin-top: 26px;
   }
@@ -546,8 +546,11 @@
     text-align: left;
   }
 
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
   @media (max-width: 640px) {
-    .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     .search { width: 100%; margin-left: 0; }
     header h1 { font-size: 26px; }
     .form-grid { grid-template-columns: 1fr; }
@@ -860,7 +863,7 @@
   var curDecade = "all";
   var curSort = "year";
   var curPage = 1;
-  var PAGE_SIZE = 12;   // 每页卡片数
+  var PAGE_SIZE = 15;   // 每页 5 列 × 3 行
   var keyword = "";
   var editingId = null;
   var addStatus = "watched";   // 搜索添加时的状态选择
@@ -1519,8 +1522,38 @@
       lines.push("没有新的电影或电视剧");
     }
     if (res.skipped) lines.push("已有的 " + res.skipped + " 部已跳过");
-    if (res.more) lines.push("还有没导完的，再点一次");
+    if (res.more) lines.push("还有没导完的，再点一次会接着导入");
     return lines.join("\n");
+  }
+
+  function importProgress(added, res) {
+    var names = { done: "看过", doing: "在看", mark: "想看" };
+    var bits = [];
+    var progress = res.progress || {};
+    ["done", "doing", "mark"].forEach(function (key) {
+      var item = progress[key];
+      if (!item || !item.total) return;
+      bits.push(names[key] + " " + Math.min(item.read || 0, item.total) + "/" + item.total);
+    });
+    var line = "已新加 " + added + " 部";
+    if (bits.length) line += "（" + bits.join("，") + "）";
+    if (res.more) line += "，还在继续，请先别关这个窗口";
+    return line;
+  }
+
+  function emptyCounts() {
+    return {
+      movie: { watched: 0, doing: 0, want: 0 },
+      tv: { watched: 0, doing: 0, want: 0 }
+    };
+  }
+
+  function mergeCounts(into, extra) {
+    ["movie", "tv"].forEach(function (kind) {
+      ["watched", "doing", "want"].forEach(function (status) {
+        into[kind][status] += (extra && extra[kind] && extra[kind][status]) || 0;
+      });
+    });
   }
 
   var doubanImportMask = document.getElementById("doubanImportMask");
@@ -1565,23 +1598,47 @@
     }
     saving = true;
     document.getElementById("doubanImportSubmit").disabled = true;
-    doubanImportStatus.textContent = "正在从豆瓣读取，片单多的话要等一会儿…";
-    api("/api/movies/import-douban", {
-      method: "POST",
-      body: { user: user, statuses: statuses, cursors: doubanCursors }
-    }).then(function (res) {
-      saving = false;
-      document.getElementById("doubanImportSubmit").disabled = false;
-      applyList(res);
-      doubanCursors = res.cursors || {};
-      var message = importSummary(res);
-      doubanImportStatus.textContent = message;
-      toast(res.added ? "新加 " + res.added + " 部" : "没有新的电影或电视剧");
-    }).catch(function (err) {
-      saving = false;
-      document.getElementById("doubanImportSubmit").disabled = false;
-      doubanImportStatus.textContent = err.message || "导入失败";
-    });
+    doubanImportStatus.textContent = "正在从豆瓣读取。看过和想看加起来有一千部左右，会分几次拉，请先别关这个窗口…";
+    var added = 0;
+    var skipped = 0;
+    var counts = emptyCounts();
+    var rounds = 0;
+    function pull() {
+      rounds += 1;
+      if (rounds > 40) {
+        saving = false;
+        document.getElementById("doubanImportSubmit").disabled = false;
+        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, counts: counts, more: true });
+        toast(added ? "新加 " + added + " 部" : "还没有导完");
+        return;
+      }
+      api("/api/movies/import-douban", {
+        method: "POST",
+        body: { user: user, statuses: statuses, cursors: doubanCursors }
+      }).then(function (res) {
+        applyList(res);
+        added += res.added || 0;
+        skipped += res.skipped || 0;
+        mergeCounts(counts, res.counts);
+        doubanCursors = res.cursors || {};
+        if (res.more) {
+          doubanImportStatus.textContent = importProgress(added, res);
+          pull();
+          return;
+        }
+        saving = false;
+        document.getElementById("doubanImportSubmit").disabled = false;
+        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, counts: counts, more: false });
+        toast(added ? "新加 " + added + " 部" : "没有新的电影或电视剧");
+      }).catch(function (err) {
+        saving = false;
+        document.getElementById("doubanImportSubmit").disabled = false;
+        var message = err.message || "导入失败";
+        if (added) message += "\n已经导入 " + added + " 部，再点一次会从这里继续";
+        doubanImportStatus.textContent = message;
+      });
+    }
+    pull();
   });
 
   /* ==================== 筛选 / 搜索 ==================== */
