@@ -377,7 +377,7 @@ export const profile = {
     },
     {
       name: { zh: "网络测速", en: "Speed test" },
-      href: "/speedtest/",
+      href: "/speedtest/?v=2",
     },
   ] as PersonalTool[],
   sites: [
