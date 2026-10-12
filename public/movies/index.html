@@ -16,6 +16,7 @@
     --accent: #f0b429;
     --line: #2a3040;
     --watched: #34c98e;
+    --doing: #e08a3c;
     --want: #5aa9ff;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -41,7 +42,7 @@
   header .title-block h1 { font-size: 32px; letter-spacing: 2px; }
   header .title-block h1 span { color: var(--accent); }
   header .title-block p { color: var(--muted); font-size: 14px; margin-top: 8px; }
-  .backup-btns { margin-left: auto; display: flex; gap: 8px; }
+  .backup-btns { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .backup-btns button {
     background: transparent;
     color: var(--muted);
@@ -63,6 +64,7 @@
   }
   .home-link:hover { color: var(--accent); }
   body:not(.is-admin) #importBtn,
+  body:not(.is-admin) #doubanImportBtn,
   body:not(.is-admin) #updateBtn { display: none; }
   #loginBtn {
     color: #111;
@@ -281,6 +283,7 @@
     background-repeat: no-repeat;
     background-position: right 9px center;
   }
+  .status-select.doing { background-color: var(--doing); }
   .status-select.want { background-color: var(--want); }
   .badge.rating {
     bottom: 10px;
@@ -292,6 +295,7 @@
   }
   .badge.status { top: 10px; right: 10px; font-weight: 600; color: #0c0f14; }
   .badge.status.watched { background: var(--watched); }
+  .badge.status.doing { background: var(--doing); }
   .badge.status.want { background: var(--want); }
   .card-tools {
     position: absolute;
@@ -407,6 +411,7 @@
     transition: all .2s;
   }
   .status-toggle button.active[data-status="watched"] { border-color: var(--watched); color: var(--watched); }
+  .status-toggle button.active[data-status="doing"] { border-color: var(--doing); color: var(--doing); }
   .status-toggle button.active[data-status="want"] { border-color: var(--want); color: var(--want); }
   .search-box input {
     width: 100%;
@@ -559,6 +564,7 @@
   <div class="backup-btns">
     <button id="loginBtn" type="button">登录</button>
     <button id="updateBtn" type="button">更新</button>
+    <button id="doubanImportBtn" type="button">豆瓣导入</button>
     <button id="exportBtn" type="button">导出备份</button>
     <button id="importBtn" type="button">导入</button>
     <input type="file" id="importFile" accept=".json" style="display:none">
@@ -569,6 +575,7 @@
   <div class="tabs" id="statusTabs">
     <button data-status="all" class="active">全部</button>
     <button data-status="watched">看过</button>
+    <button data-status="doing">在看</button>
     <button data-status="want">想看</button>
   </div>
   <input class="search" id="searchInput" placeholder="搜索片名 / 导演 / 演员">
@@ -607,6 +614,7 @@
       <h3>添加影片</h3>
       <div class="status-toggle" id="statusToggle">
         <button data-status="watched" class="active">看过</button>
+        <button data-status="doing">在看</button>
         <button data-status="want">想看</button>
       </div>
       <div class="search-box">
@@ -649,6 +657,7 @@
             <label>状态</label>
             <select name="status">
               <option value="watched">看过</option>
+              <option value="doing">在看</option>
               <option value="want">想看</option>
             </select>
           </div>
@@ -686,6 +695,29 @@
       </form>
     </div>
 
+  </div>
+</div>
+
+<div class="modal-mask" id="doubanImportMask">
+  <div class="modal confirm-modal">
+    <h3>从豆瓣导入</h3>
+    <p class="confirm-text">不用豆瓣密码。打开自己的豆瓣个人主页，把地址贴进来，或只填 people/ 后面的那段。片单需要设成别人不登录也能看见。只导入电影和电视剧。</p>
+    <form id="doubanImportForm">
+      <div class="form-item" style="margin-top:14px">
+        <label>豆瓣个人主页</label>
+        <input id="doubanUser" placeholder="https://www.douban.com/people/你的ID/" autocomplete="off">
+      </div>
+      <div class="status-toggle" id="doubanStatusPick" style="margin-top:14px">
+        <button type="button" data-status="watched" class="active">看过</button>
+        <button type="button" data-status="doing" class="active">在看</button>
+        <button type="button" data-status="want" class="active">想看</button>
+      </div>
+      <div class="search-status" id="doubanImportStatus"></div>
+      <div class="modal-btns">
+        <button type="button" class="btn-cancel" id="doubanImportCancel">取消</button>
+        <button type="submit" class="btn-save" id="doubanImportSubmit">开始导入</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -904,8 +936,14 @@
   }
 
   /* ==================== 渲染 ==================== */
+  function statusName(status) {
+    if (status === "watched") return "看过";
+    if (status === "doing") return "在看";
+    return "想看";
+  }
+
   function cardHtml(item) {
-    var isWatched = item.status === "watched";
+    var statusCls = item.status === "want" ? "want" : (item.status === "doing" ? "doing" : "watched");
     var ratingBadge = (item.rating !== undefined && item.rating !== "" && item.rating !== null)
       ? '<span class="badge rating">★ ' + esc(item.rating) + '</span>' : "";
     var posterImg = item.poster
@@ -917,16 +955,16 @@
         '<span class="initial">' + esc(item.title.charAt(0)) + '</span>' +
         posterImg +
         (isAdmin
-          ? '<select class="status-select' + (isWatched ? "" : " want") + '" title="点击切换看过 / 想看">' +
-              '<option value="watched"' + (isWatched ? " selected" : "") + '>看过</option>' +
-              '<option value="want"' + (isWatched ? "" : " selected") + '>想看</option>' +
+          ? '<select class="status-select ' + statusCls + '" title="点击切换看过 / 在看 / 想看">' +
+              '<option value="watched"' + (item.status === "watched" ? " selected" : "") + '>看过</option>' +
+              '<option value="doing"' + (item.status === "doing" ? " selected" : "") + '>在看</option>' +
+              '<option value="want"' + (item.status === "want" ? " selected" : "") + '>想看</option>' +
             '</select>' +
             '<div class="card-tools">' +
               '<button type="button" class="edit-btn" title="编辑">✎</button>' +
               '<button type="button" class="del-btn" title="删除">✕</button>' +
             '</div>'
-          : '<span class="badge status ' + (isWatched ? "watched" : "want") + '">' +
-              (isWatched ? "看过" : "想看") + '</span>') +
+          : '<span class="badge status ' + statusCls + '">' + statusName(item.status) + '</span>') +
         ratingBadge +
       '</div>' +
       '<div class="info">' +
@@ -1033,12 +1071,12 @@
   }
 
   function renderCounts() {
-    var counts = { all: items.length, watched: 0, want: 0 };
+    var counts = { all: items.length, watched: 0, doing: 0, want: 0 };
     items.forEach(function (m) { counts[m.status] = (counts[m.status] || 0) + 1; });
     document.querySelectorAll("#statusTabs button").forEach(function (btn) {
       var s = btn.getAttribute("data-status");
-      var base = s === "all" ? "全部" : (s === "watched" ? "看过" : "想看");
-      btn.innerHTML = base + '<span class="count">' + counts[s] + '</span>';
+      var names = { all: "全部", watched: "看过", doing: "在看", want: "想看" };
+      btn.innerHTML = (names[s] || "想看") + '<span class="count">' + (counts[s] || 0) + '</span>';
     });
   }
 
@@ -1132,7 +1170,7 @@
     btn.classList.add("active");
     // 新增：搜索结果已显示时，提示文字同步跟随切换
     if (resultList.children.length) {
-      searchStatus.textContent = "点一下就加入「" + (addStatus === "watched" ? "看过" : "想看") + "」：";
+      searchStatus.textContent = "点一下就加入「" + statusName(addStatus) + "」：";
     }
   });
 
@@ -1199,7 +1237,7 @@
       searchStatus.textContent = "豆瓣上没有找到「" + kw + "」相关的结果";
       return;
     }
-    searchStatus.textContent = "点一下就加入「" + (addStatus === "watched" ? "看过" : "想看") + "」：";
+    searchStatus.textContent = "点一下就加入「" + statusName(addStatus) + "」：";
     resultList.innerHTML = list.slice(0, 8).map(function (r, i) {
       var isTv = r.episode && r.episode !== "0" && r.episode !== "";
       var url = (r.url || "").split("?")[0];
@@ -1335,7 +1373,7 @@
     api("/api/movies/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
       saving = false;
       applyList(res);
-      toast("《" + item.title + "》已改为「" + (next === "watched" ? "看过" : "想看") + "」");
+      toast("《" + item.title + "》已改为「" + statusName(next) + "」");
     }).catch(function (err) {
       saving = false;
       render();
@@ -1454,6 +1492,66 @@
       importFile.value = "";
     };
     reader.readAsText(file);
+  });
+
+  var doubanImportMask = document.getElementById("doubanImportMask");
+  var doubanImportStatus = document.getElementById("doubanImportStatus");
+  var doubanCursors = {};
+  var doubanCursorUser = "";
+  document.getElementById("doubanStatusPick").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    btn.classList.toggle("active");
+  });
+  document.getElementById("doubanImportBtn").addEventListener("click", function () {
+    if (!mustAdmin()) return;
+    doubanImportStatus.textContent = "";
+    doubanImportMask.classList.add("show");
+    setTimeout(function () { document.getElementById("doubanUser").focus(); }, 50);
+  });
+  document.getElementById("doubanImportCancel").addEventListener("click", function () {
+    if (saving) return;
+    doubanImportMask.classList.remove("show");
+  });
+  doubanImportMask.addEventListener("click", function (e) {
+    if (e.target === doubanImportMask && !saving) doubanImportMask.classList.remove("show");
+  });
+  document.getElementById("doubanImportForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!mustAdmin()) return;
+    var user = document.getElementById("doubanUser").value.trim();
+    if (!user) { doubanImportStatus.textContent = "请填写豆瓣个人主页"; return; }
+    var statusMap = { watched: "done", doing: "doing", want: "mark" };
+    var statuses = [];
+    document.querySelectorAll("#doubanStatusPick button.active").forEach(function (btn) {
+      statuses.push(statusMap[btn.getAttribute("data-status")]);
+    });
+    if (!statuses.length) { doubanImportStatus.textContent = "请至少选择一种"; return; }
+    if (user !== doubanCursorUser) {
+      doubanCursorUser = user;
+      doubanCursors = {};
+    }
+    saving = true;
+    document.getElementById("doubanImportSubmit").disabled = true;
+    doubanImportStatus.textContent = "正在从豆瓣读取，片单多的话要等一会儿…";
+    api("/api/movies/import-douban", {
+      method: "POST",
+      body: { user: user, statuses: statuses, cursors: doubanCursors }
+    }).then(function (res) {
+      saving = false;
+      document.getElementById("doubanImportSubmit").disabled = false;
+      applyList(res);
+      doubanCursors = res.cursors || {};
+      var message = res.added ? "已导入 " + res.added + " 部" : "没有新的电影或电视剧";
+      if (res.skipped) message += "，已有的 " + res.skipped + " 部已跳过";
+      if (res.more) message += "。还有没导完的，再点一次";
+      doubanImportStatus.textContent = message;
+      toast(message);
+    }).catch(function (err) {
+      saving = false;
+      document.getElementById("doubanImportSubmit").disabled = false;
+      doubanImportStatus.textContent = err.message || "导入失败";
+    });
   });
 
   /* ==================== 筛选 / 搜索 ==================== */

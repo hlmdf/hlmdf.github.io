@@ -27,6 +27,7 @@ import shutil
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -204,7 +205,7 @@ def clean_movie(body, movie_id):
         "titleEn": text_of(body.get("titleEn"), 200),
         "year": year_out,
         "type": kind if kind in ("movie", "tv") else "movie",
-        "status": status if status in ("watched", "want") else "watched",
+        "status": status if status in ("watched", "want", "doing") else "watched",
         "director": text_of(body.get("director"), 200),
         "actors": list_of(body.get("actors")),
         "regions": list_of(body.get("regions")),
@@ -315,6 +316,120 @@ def apply_missing(current, updated):
     return changed
 
 
+DOUBAN_STATUS = {"done": "watched", "doing": "doing", "mark": "want"}
+USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+
+
+def parse_douban_user(text):
+    text = text_of(text, 300)
+    match = re.search(r"people/([^/?#\s]+)", text, re.I)
+    uid = urllib.parse.unquote(match.group(1) if match else text).strip().strip("/")
+    if not USER_RE.fullmatch(uid):
+        return ""
+    return uid
+
+
+def person_names(value, limit):
+    if not isinstance(value, list):
+        return []
+    names = []
+    for item in value:
+        name = item.get("name") if isinstance(item, dict) else item
+        name = text_of(name, 40)
+        if name:
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def regions_from_card(card):
+    parts = [part.strip() for part in str(card or "").split("/")]
+    if len(parts) < 2 or not parts[1]:
+        return []
+    return [part for part in re.split(r"\s+", parts[1]) if part][:8]
+
+
+def subject_score(subject):
+    rating = subject.get("rating")
+    value = rating.get("value") if isinstance(rating, dict) else rating
+    try:
+        value = round(float(value), 1)
+    except (TypeError, ValueError):
+        return ""
+    if value <= 0 or value > 10:
+        return ""
+    return value
+
+
+def interest_to_movie(interest):
+    if not isinstance(interest, dict):
+        return None
+    subject = interest.get("subject")
+    if not isinstance(subject, dict):
+        return None
+    if subject.get("type") not in ("movie", "tv"):
+        return None
+    sid = str(subject.get("id") or "")
+    if not sid.isdigit():
+        return None
+    year_text = str(subject.get("year") or "")
+    year_match = re.search(r"(19|20)\d{2}", year_text)
+    directors = person_names(subject.get("directors"), 3)
+    try:
+        return clean_movie({
+            "title": subject.get("title") or "",
+            "year": int(year_match.group(0)) if year_match else "",
+            "type": subject.get("type"),
+            "status": DOUBAN_STATUS.get(interest.get("status"), "watched"),
+            "director": "，".join(directors),
+            "actors": person_names(subject.get("actors"), 8),
+            "regions": regions_from_card(subject.get("card_subtitle")),
+            "genres": subject.get("genres") or [],
+            "rating": subject_score(subject),
+            "douban": subject.get("url") or ("https://movie.douban.com/subject/%s/" % sid),
+            "poster": subject.get("cover_url") or "",
+        }, new_id())
+    except ValueError:
+        return None
+
+
+def fetch_douban_interests(uid, status, start):
+    query = urllib.parse.urlencode({
+        "status": status,
+        "start": start,
+        "count": 50,
+        "for_mobile": 1,
+    })
+    url = "https://m.douban.com/rexxar/api/v2/user/%s/interests?%s" % (urllib.parse.quote(uid), query)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+        "Referer": "https://m.douban.com/people/%s/interests" % urllib.parse.quote(uid),
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise ValueError("没有找到这个豆瓣用户")
+        if exc.code in (401, 403):
+            raise ValueError("这个片单没有公开。请在豆瓣把看过和想看设为所有人可见")
+        raise ValueError("豆瓣暂时没有回应")
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError("豆瓣暂时没有回应")
+    if not isinstance(data, dict) or not isinstance(data.get("interests"), list):
+        raise ValueError("豆瓣返回的内容无法识别")
+    return data["interests"]
+
+
+def subject_id_of(movie):
+    match = SUBJECT_RE.search(movie.get("douban") or "")
+    return match.group(1) if match else ""
+
+
 def client_ip_of(handler):
     return handler.client_address[0]
 
@@ -369,6 +484,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.handle_login()
         if path == "/api/movies/fill-ratings" or path == "/api/movies/refresh":
             return self.handle_refresh()
+        if path == "/api/movies/import-douban":
+            return self.handle_import_douban()
         if path == "/api/movies":
             return self.handle_create()
         self.send_json({"error": "没有这个接口"}, 404)
@@ -584,6 +701,104 @@ class Handler(SimpleHTTPRequestHandler):
                 save_movies(current)
                 items = current
         self.send_json({"ok": True, "filled": changed, "more": more, "items": items})
+
+    def handle_import_douban(self):
+        if not self.require_auth():
+            return
+        try:
+            body = self.read_json()
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        if not isinstance(body, dict):
+            return self.send_json({"error": "格式不对"}, 400)
+        uid = parse_douban_user(body.get("user"))
+        if not uid:
+            return self.send_json({"error": "请填写豆瓣个人主页链接，或 people/ 后面的那段 ID"}, 400)
+        wanted = body.get("statuses")
+        if not isinstance(wanted, list) or not wanted:
+            wanted = ["done", "doing", "mark"]
+        statuses = [item for item in ("done", "doing", "mark") if item in wanted]
+        if not statuses:
+            return self.send_json({"error": "请至少选择看过、在看或想看中的一种"}, 400)
+        raw_cursors = body.get("cursors") if isinstance(body.get("cursors"), dict) else {}
+        with LOCK:
+            try:
+                current = load_movies()
+            except ValueError as exc:
+                return self.send_json({"error": str(exc)}, 500)
+        seen = {sid for sid in (subject_id_of(movie) for movie in current) if sid}
+        fresh = []
+        skipped = 0
+        more = False
+        next_cursors = {}
+        deadline = time.time() + 40
+        try:
+            for status in statuses:
+                try:
+                    start = max(0, int(raw_cursors.get(status) or 0))
+                except (TypeError, ValueError):
+                    start = 0
+                finished = False
+                while True:
+                    if time.time() > deadline or len(fresh) >= 2000:
+                        break
+                    interests = fetch_douban_interests(uid, status, start)
+                    if not interests:
+                        finished = True
+                        break
+                    for interest in interests:
+                        movie = interest_to_movie(interest)
+                        if not movie:
+                            continue
+                        sid = subject_id_of(movie)
+                        if not sid or sid in seen:
+                            if sid in seen:
+                                skipped += 1
+                            continue
+                        seen.add(sid)
+                        fresh.append(movie)
+                    if len(interests) < 50:
+                        finished = True
+                        break
+                    start += 50
+                    time.sleep(0.25)
+                next_cursors[status] = 0 if finished else start
+                if not finished:
+                    more = True
+                    break
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 502)
+        for status in statuses:
+            if status not in next_cursors:
+                try:
+                    next_cursors[status] = max(0, int(raw_cursors.get(status) or 0))
+                except (TypeError, ValueError):
+                    next_cursors[status] = 0
+        added = 0
+        with LOCK:
+            try:
+                current = load_movies()
+            except ValueError as exc:
+                return self.send_json({"error": str(exc)}, 500)
+            have = {sid for sid in (subject_id_of(movie) for movie in current) if sid}
+            for movie in fresh:
+                sid = subject_id_of(movie)
+                if sid in have:
+                    skipped += 1
+                    continue
+                have.add(sid)
+                current.append(movie)
+                added += 1
+            if added:
+                save_movies(current)
+        self.send_json({
+            "ok": True,
+            "added": added,
+            "skipped": skipped,
+            "more": more,
+            "cursors": next_cursors,
+            "items": current,
+        })
 
     def handle_import(self):
         if not self.require_auth():
