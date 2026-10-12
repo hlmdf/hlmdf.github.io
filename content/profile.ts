@@ -375,6 +375,10 @@ export const profile = {
       name: { zh: "B站音频提取", en: "Bilibili audio" },
       href: "https://47.103.222.155:5000",
     },
+    {
+      name: { zh: "网络测速", en: "Speed test" },
+      href: "/speedtest/",
+    },
   ] as PersonalTool[],
   sites: [
     {
