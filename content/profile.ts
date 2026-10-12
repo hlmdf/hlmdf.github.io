@@ -377,7 +377,7 @@ export const profile = {
     },
     {
       name: { zh: "网络测速", en: "Speed test" },
-      href: "/speedtest/?v=2",
+      href: "/speedtest/",
     },
     {
       name: { zh: "文件中转站", en: "File drop" },
