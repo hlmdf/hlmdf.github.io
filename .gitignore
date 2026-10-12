@@ -33,6 +33,13 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# movie list and admin password, kept on the server only
+/tools/movie-tracker/config.json
+/tools/movie-tracker/movies.json
+/tools/movie-tracker/movies.json.bak
+/tools/movie-tracker/movies.json.tmp
+/tools/movie-tracker/__pycache__/
+
 # vercel
 .vercel
 

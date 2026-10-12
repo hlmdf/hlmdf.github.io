@@ -383,6 +383,10 @@ export const profile = {
       name: { zh: "文件中转站", en: "File drop" },
       href: "https://47.103.222.155:5002",
     },
+    {
+      name: { zh: "我的片单", en: "Movies" },
+      href: "/movies/",
+    },
   ] as PersonalTool[],
   sites: [
     {
