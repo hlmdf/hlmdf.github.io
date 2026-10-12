@@ -264,6 +264,10 @@
     border-color: var(--accent);
     background: var(--card-hover);
   }
+  .card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
   .poster {
     position: relative;
     aspect-ratio: 2 / 3;
@@ -379,6 +383,118 @@
     transition: opacity .2s;
   }
   .card:hover .douban-hint { opacity: 1; }
+
+  .detail-modal {
+    max-width: 760px;
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,.55);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .detail-close:hover { background: var(--accent); color: #111; }
+  .detail-layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .detail-poster {
+    position: relative;
+    min-height: 360px;
+    background: #1a1f28;
+  }
+  .detail-poster img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .detail-poster .initial {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 72px;
+    font-weight: 700;
+    color: rgba(255,255,255,.9);
+  }
+  .detail-main { padding: 28px 28px 24px; }
+  .detail-kicker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .detail-chip {
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 3px 10px;
+    color: #0c0f14;
+  }
+  .detail-chip.watched { background: var(--watched); }
+  .detail-chip.doing { background: var(--doing); }
+  .detail-chip.want { background: var(--want); }
+  .detail-chip.plain {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+  }
+  .detail-modal h3.detail-title {
+    font-size: 26px;
+    line-height: 1.3;
+    margin: 0;
+    padding-right: 28px;
+  }
+  .detail-year { color: var(--muted); font-size: 16px; font-weight: 500; margin-left: 8px; }
+  .detail-en {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 14px;
+    font-style: italic;
+  }
+  .detail-score {
+    margin-top: 14px;
+    color: var(--accent);
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .detail-rows { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .detail-row { font-size: 14px; color: var(--text); line-height: 1.6; }
+  .detail-row span { color: var(--accent); margin-right: 8px; }
+  .detail-actions { margin-top: 22px; }
+  .detail-douban {
+    display: inline-block;
+    background: var(--accent);
+    color: #111;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 14px;
+  }
+  .detail-douban:hover { filter: brightness(1.1); }
+  @media (max-width: 640px) {
+    .detail-layout { grid-template-columns: 1fr; }
+    .detail-poster { min-height: 220px; height: 240px; }
+  }
   .empty-all { text-align: left; color: var(--muted); padding: 28px 0 24px; font-size: 15px; }
 
   /* ---------- 添加按钮 ---------- */
@@ -533,7 +649,9 @@
   .btn-danger:hover { filter: brightness(1.1); }
   .confirm-modal { max-width: 360px; }
   #doubanImportMask .confirm-modal { max-width: 440px; }
-  #doubanImportStatus { white-space: pre-line; line-height: 1.7; }
+  #doubanImportStatus, #doubanLoginStatus { white-space: pre-line; line-height: 1.7; }
+  .douban-captcha { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .douban-captcha img { height: 40px; border-radius: 6px; background: #fff; }
   .confirm-text { color: var(--muted); font-size: 14px; line-height: 1.7; }
 
   /* 提示条 */
@@ -592,7 +710,7 @@
 <header>
   <div class="title-block">
     <h1>我的<span>片单</span></h1>
-    <p>记录看过的、想看的电影和电视剧 · 点击卡片跳转豆瓣影片页</p>
+    <p>记录看过的、想看的电影和电视剧 · 点击卡片查看详情</p>
     <a class="home-link" href="/personal/">返回个人工具</a>
   </div>
   <div class="backup-btns">
@@ -736,12 +854,28 @@
 <div class="modal-mask" id="doubanImportMask">
   <div class="modal confirm-modal">
     <h3>从豆瓣导入</h3>
-    <p class="confirm-text">不用豆瓣密码。打开自己的豆瓣个人主页，把地址贴进来，或只填 people/ 后面的那段。片单需要设成别人不登录也能看见。只导入电影和电视剧。</p>
-    <form id="doubanImportForm">
+    <p class="confirm-text">要登录你的豆瓣账号，才能读到登录后才看得到的片子。密码只用来登录，不会写进片单。</p>
+    <form id="doubanLoginForm">
       <div class="form-item" style="margin-top:14px">
-        <label>豆瓣个人主页</label>
-        <input id="doubanUser" value="https://www.douban.com/people/194819170/" placeholder="https://www.douban.com/people/你的ID/" autocomplete="off">
+        <label>豆瓣账号</label>
+        <input id="doubanAccount" placeholder="手机号或邮箱" autocomplete="username">
       </div>
+      <div class="form-item">
+        <label>豆瓣密码</label>
+        <input id="doubanPassword" type="password" placeholder="豆瓣密码" autocomplete="current-password">
+      </div>
+      <div class="douban-captcha" id="doubanCaptchaBox" style="display:none">
+        <img id="doubanCaptchaImg" alt="验证码">
+        <input id="doubanCaptcha" placeholder="验证码" autocomplete="off">
+      </div>
+      <div class="search-status" id="doubanLoginStatus"></div>
+      <div class="modal-btns">
+        <button type="button" class="btn-cancel" id="doubanImportCancel">取消</button>
+        <button type="submit" class="btn-save" id="doubanLoginBtn">登录豆瓣</button>
+      </div>
+    </form>
+    <form id="doubanImportForm" style="display:none">
+      <p class="confirm-text" id="doubanWho"></p>
       <div class="status-toggle" id="doubanStatusPick" style="margin-top:14px">
         <button type="button" data-status="watched" class="active">看过</button>
         <button type="button" data-status="doing" class="active">在看</button>
@@ -749,7 +883,7 @@
       </div>
       <div class="search-status" id="doubanImportStatus"></div>
       <div class="modal-btns">
-        <button type="button" class="btn-cancel" id="doubanImportCancel">取消</button>
+        <button type="button" class="btn-cancel" id="doubanLogoutBtn">退出豆瓣</button>
         <button type="submit" class="btn-save" id="doubanImportSubmit">开始导入</button>
       </div>
     </form>
@@ -773,6 +907,14 @@
         <button type="submit" class="btn-save">登录</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- 影片详情 -->
+<div class="modal-mask" id="detailMask">
+  <div class="modal detail-modal" role="dialog" aria-labelledby="detailTitle">
+    <button type="button" class="detail-close" id="detailClose" aria-label="关闭">✕</button>
+    <div class="detail-layout" id="detailBody"></div>
   </div>
 </div>
 
@@ -985,7 +1127,7 @@
       ? '<img src="' + esc(item.poster) + '"' + relayAttr(item.poster) + ' loading="lazy" alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
 
     return '' +
-    '<div class="card" data-id="' + esc(item.id) + '" data-url="' + esc(doubanUrl(item)) + '">' +
+    '<div class="card" role="button" tabindex="0" aria-label="' + esc(item.title) + '" data-id="' + esc(item.id) + '">' +
       '<div class="poster" style="background:' + posterStyle(item.title) + '">' +
         '<span class="initial">' + esc(item.title.charAt(0)) + '</span>' +
         posterImg +
@@ -1014,7 +1156,7 @@
           (((item.regions && item.regions.length) || (item.genres && item.genres.length)) ?
             '<div class="line"><span class="label">地区/类型</span>' + esc((item.regions || []).concat(item.genres || []).join(" / ")) + '</div>' : '') +
         '</div>' +
-        '<div class="douban-hint">在豆瓣中查看 →</div>' +
+        '<div class="douban-hint">查看详情</div>' +
       '</div>' +
     '</div>';
   }
@@ -1388,7 +1530,58 @@
     });
   });
 
-  /* ==================== 卡片交互：跳转 / 编辑 / 删除 / 状态切换 ==================== */
+  /* ==================== 详情：先展开，再由按钮去豆瓣 ==================== */
+  var detailMask = document.getElementById("detailMask");
+
+  function detailLine(label, value) {
+    if (!value) return "";
+    return '<div class="detail-row"><span>' + esc(label) + '</span>' + esc(value) + '</div>';
+  }
+
+  function openDetail(item) {
+    var statusCls = item.status === "want" ? "want" : (item.status === "doing" ? "doing" : "watched");
+    var posterImg = item.poster
+      ? '<img src="' + esc(item.poster) + '"' + relayAttr(item.poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var score = (item.rating !== undefined && item.rating !== "" && item.rating !== null)
+      ? '<div class="detail-score">★ ' + esc(item.rating) + '</div>' : "";
+    document.getElementById("detailBody").innerHTML =
+      '<div class="detail-poster" style="background:' + posterStyle(item.title) + '">' +
+        '<span class="initial">' + esc(item.title.charAt(0)) + '</span>' + posterImg +
+      '</div>' +
+      '<div class="detail-main">' +
+        '<div class="detail-kicker">' +
+          '<span class="detail-chip ' + statusCls + '">' + statusName(item.status) + '</span>' +
+          '<span class="detail-chip plain">' + (item.type === "tv" ? "电视剧" : "电影") + '</span>' +
+        '</div>' +
+        '<h3 class="detail-title" id="detailTitle">' + esc(item.title) +
+          (item.year ? '<span class="detail-year">' + esc(item.year) + '</span>' : '') +
+        '</h3>' +
+        (item.titleEn ? '<div class="detail-en">' + esc(item.titleEn) + '</div>' : '') +
+        score +
+        '<div class="detail-rows">' +
+          detailLine("导演", item.director) +
+          detailLine("主演", (item.actors || []).join(" / ")) +
+          detailLine("地区", (item.regions || []).join(" / ")) +
+          detailLine("类型", (item.genres || []).join(" / ")) +
+        '</div>' +
+        '<div class="detail-actions">' +
+          '<a class="detail-douban" href="' + esc(doubanUrl(item)) + '" target="_blank" rel="noopener">在豆瓣打开</a>' +
+        '</div>' +
+      '</div>';
+    detailMask.classList.add("show");
+  }
+
+  function closeDetail() {
+    detailMask.classList.remove("show");
+  }
+
+  document.getElementById("detailClose").addEventListener("click", closeDetail);
+  detailMask.addEventListener("click", function (e) { if (e.target === detailMask) closeDetail(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && detailMask.classList.contains("show")) closeDetail();
+  });
+
+  /* ==================== 卡片交互：详情 / 编辑 / 删除 / 状态切换 ==================== */
   mainEl.addEventListener("click", function (e) {
     // 分页按钮
     var pagerBtn = e.target.closest(".pager button");
@@ -1415,8 +1608,16 @@
     if (e.target.closest(".edit-btn")) { openEditModal(item); return; }
     if (e.target.closest(".del-btn")) { askDelete(item); return; }
 
-    // 点卡片其他区域：跳转豆瓣影片页
-    window.open(card.getAttribute("data-url"), "_blank", "noopener");
+    openDetail(item);
+  });
+
+  mainEl.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var card = e.target.closest(".card");
+    if (!card || e.target.closest(".status-select, .edit-btn, .del-btn")) return;
+    e.preventDefault();
+    var item = items.find(function (m) { return m.id === card.getAttribute("data-id"); });
+    if (item) openDetail(item);
   });
 
   // 卡片右上角下拉：直接切换 看过 / 想看
@@ -1697,21 +1898,33 @@
 
   var doubanImportMask = document.getElementById("doubanImportMask");
   var doubanImportStatus = document.getElementById("doubanImportStatus");
-  var doubanUserInput = document.getElementById("doubanUser");
-  var DEFAULT_DOUBAN_USER = "https://www.douban.com/people/194819170/";
+  var doubanLoginStatus = document.getElementById("doubanLoginStatus");
   var doubanCursors = {};
-  var doubanCursorUser = DEFAULT_DOUBAN_USER;
+  var doubanCaptchaId = "";
   document.getElementById("doubanStatusPick").addEventListener("click", function (e) {
     var btn = e.target.closest("button");
     if (!btn) return;
     btn.classList.toggle("active");
   });
+  function showDoubanLogin() {
+    document.getElementById("doubanLoginForm").style.display = "";
+    document.getElementById("doubanImportForm").style.display = "none";
+  }
+  function showDoubanReady(uid) {
+    document.getElementById("doubanLoginForm").style.display = "none";
+    document.getElementById("doubanImportForm").style.display = "";
+    document.getElementById("doubanWho").textContent = "已登录豆瓣账号 " + uid + "。只导入电影和电视剧。";
+  }
   document.getElementById("doubanImportBtn").addEventListener("click", function () {
     if (!mustAdmin()) return;
-    if (!doubanUserInput.value.trim()) doubanUserInput.value = DEFAULT_DOUBAN_USER;
+    doubanLoginStatus.textContent = "";
     doubanImportStatus.textContent = "";
+    showDoubanLogin();
     doubanImportMask.classList.add("show");
-    setTimeout(function () { document.getElementById("doubanUser").focus(); }, 50);
+    api("/api/douban/session").then(function (res) {
+      if (res.loggedIn) showDoubanReady(res.uid);
+      else document.getElementById("doubanAccount").focus();
+    }).catch(function () {});
   });
   document.getElementById("doubanImportCancel").addEventListener("click", function () {
     if (saving) return;
@@ -1720,18 +1933,61 @@
   doubanImportMask.addEventListener("click", function (e) {
     if (e.target === doubanImportMask && !saving) doubanImportMask.classList.remove("show");
   });
+  document.getElementById("doubanLoginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!mustAdmin() || saving) return;
+    var account = document.getElementById("doubanAccount").value.trim();
+    var password = document.getElementById("doubanPassword").value;
+    var captcha = document.getElementById("doubanCaptcha").value.trim();
+    if (!account || !password) { doubanLoginStatus.textContent = "请填写豆瓣账号和密码"; return; }
+    if (doubanCaptchaId && !captcha) { doubanLoginStatus.textContent = "请填写验证码"; return; }
+    saving = true;
+    document.getElementById("doubanLoginBtn").disabled = true;
+    doubanLoginStatus.textContent = "正在登录豆瓣…";
+    api("/api/douban/login", {
+      method: "POST",
+      body: { account: account, password: password, captchaId: doubanCaptchaId, captcha: captcha }
+    }).then(function (res) {
+      saving = false;
+      document.getElementById("doubanLoginBtn").disabled = false;
+      if (res.needCaptcha) {
+        doubanCaptchaId = res.captchaId || "";
+        document.getElementById("doubanCaptchaBox").style.display = "flex";
+        document.getElementById("doubanCaptchaImg").src = res.captchaImage || "";
+        document.getElementById("doubanCaptcha").value = "";
+        doubanLoginStatus.textContent = "请填写验证码";
+        document.getElementById("doubanCaptcha").focus();
+        return;
+      }
+      doubanCaptchaId = "";
+      document.getElementById("doubanCaptchaBox").style.display = "none";
+      document.getElementById("doubanPassword").value = "";
+      doubanLoginStatus.textContent = "";
+      showDoubanReady(res.uid);
+    }).catch(function (err) {
+      saving = false;
+      document.getElementById("doubanLoginBtn").disabled = false;
+      doubanLoginStatus.textContent = err.message || "登录失败";
+    });
+  });
+  document.getElementById("doubanLogoutBtn").addEventListener("click", function () {
+    if (saving) return;
+    api("/api/douban/logout", { method: "POST", body: {} }).then(function () {
+      showDoubanLogin();
+      doubanLoginStatus.textContent = "已退出豆瓣";
+    }).catch(function (err) {
+      doubanImportStatus.textContent = err.message || "退出失败";
+    });
+  });
   document.getElementById("doubanImportForm").addEventListener("submit", function (e) {
     e.preventDefault();
     if (!mustAdmin()) return;
-    var user = doubanUserInput.value.trim();
-    if (!user) { doubanImportStatus.textContent = "请填写豆瓣个人主页"; return; }
     var statusMap = { watched: "done", doing: "doing", want: "mark" };
     var statuses = [];
     document.querySelectorAll("#doubanStatusPick button.active").forEach(function (btn) {
       statuses.push(statusMap[btn.getAttribute("data-status")]);
     });
     if (!statuses.length) { doubanImportStatus.textContent = "请至少选择一种"; return; }
-    doubanCursorUser = user;
     doubanCursors = {};
     saving = true;
     document.getElementById("doubanImportSubmit").disabled = true;
@@ -1753,7 +2009,7 @@
       }
       api("/api/movies/import-douban", {
         method: "POST",
-        body: { user: user, statuses: statuses, cursors: doubanCursors }
+        body: { statuses: statuses, cursors: doubanCursors }
       }).then(function (res) {
         applyList(res);
         added += res.added || 0;
@@ -1782,8 +2038,14 @@
         saving = false;
         document.getElementById("doubanImportSubmit").disabled = false;
         var message = err.message || "导入失败";
-        if (added) message += "\n已经导入 " + added + " 部，再点一次会从这里继续";
-        doubanImportStatus.textContent = message;
+        if (message.indexOf("登录豆瓣") !== -1 || message.indexOf("重新登录") !== -1) {
+          showDoubanLogin();
+          if (added) message += "\n已经导入 " + added + " 部，登录后再次导入会从这里继续";
+          doubanLoginStatus.textContent = message;
+        } else {
+          if (added) message += "\n已经导入 " + added + " 部，再点一次会从这里继续";
+          doubanImportStatus.textContent = message;
+        }
       });
     }
     pull();

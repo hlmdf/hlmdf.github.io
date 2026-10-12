@@ -17,8 +17,11 @@
   5. 忘记密码：停掉服务，删除 config.json，用新密码再启动一次。
      movies.json 里的片单还在。
 """
+import base64
 import hashlib
 import hmac
+import html
+import http.cookiejar
 import json
 import os
 import re
@@ -35,6 +38,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 DATA_PATH = os.path.join(BASE, "movies.json")
+DOUBAN_SESSION_PATH = os.path.join(BASE, "douban_session.json")
 LOCK = threading.Lock()
 FAILS = {}
 TOKEN_TTL = 30 * 24 * 3600
@@ -46,6 +50,7 @@ BLOCKED = {
     "cert.pem",
     "key.pem",
     "server.py",
+    "douban_session.json",
 }
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -256,6 +261,9 @@ def fetch_douban(subject_id):
             year = int(subject.get("release_year"))
         except (TypeError, ValueError):
             year = ""
+    kind = ""
+    if "is_tv" in subject:
+        kind = "tv" if subject.get("is_tv") else "movie"
     return {
         "rating": rating,
         "director": "，".join(str(name) for name in directors[:3] if name),
@@ -263,6 +271,7 @@ def fetch_douban(subject_id):
         "genres": [str(name) for name in genres[:8] if name],
         "regions": regions[:8],
         "year": year,
+        "type": kind,
     }
 
 
@@ -394,39 +403,206 @@ def interest_to_movie(interest):
         return None
 
 
-def fetch_douban_interests(uid, status, start):
-    query = urllib.parse.urlencode({
-        "status": status,
-        "start": start,
-        "count": 50,
-        "for_mobile": 1,
-    })
-    url = "https://m.douban.com/rexxar/api/v2/user/%s/interests?%s" % (urllib.parse.quote(uid), query)
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-        "Referer": "https://m.douban.com/people/%s/interests" % urllib.parse.quote(uid),
-        "Accept": "application/json",
-    })
+DOUBAN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+DOUBAN_GRID_PAGE = 15
+COLLECT_KIND = {"done": "collect", "doing": "do", "mark": "wish"}
+
+
+class DoubanNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def douban_cookie(name, value):
+    return http.cookiejar.Cookie(
+        0, str(name), str(value),
+        None, False,
+        ".douban.com", True, True,
+        "/", True,
+        False, None, True,
+        None, None, {},
+    )
+
+
+def opener_from_cookies(cookies, follow_redirect=True):
+    jar = http.cookiejar.CookieJar()
+    for name, value in (cookies or {}).items():
+        if name and value is not None:
+            jar.set_cookie(douban_cookie(name, value))
+    handlers = [urllib.request.HTTPCookieProcessor(jar)]
+    if not follow_redirect:
+        handlers.insert(0, DoubanNoRedirect())
+    return urllib.request.build_opener(*handlers), jar
+
+
+def jar_dict(jar):
+    return {cookie.name: cookie.value for cookie in jar}
+
+
+def uid_from_cookies(cookies):
+    raw = str((cookies or {}).get("dbcl2") or "").strip().strip('"')
+    match = re.match(r"(\d+):", raw)
+    return match.group(1) if match else ""
+
+
+def load_douban_session():
+    if not os.path.exists(DOUBAN_SESSION_PATH):
+        return None
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        with open(DOUBAN_SESSION_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    cookies = data.get("cookies") if isinstance(data, dict) else None
+    uid = uid_from_cookies(cookies)
+    if not uid or not isinstance(cookies, dict):
+        return None
+    return {"uid": uid, "cookies": cookies}
+
+
+def save_douban_session(cookies):
+    uid = uid_from_cookies(cookies)
+    if not uid:
+        raise ValueError("豆瓣没有登录成功")
+    payload = {"uid": uid, "cookies": cookies, "saved_at": int(time.time())}
+    tmp = DOUBAN_SESSION_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, DOUBAN_SESSION_PATH)
+    try:
+        os.chmod(DOUBAN_SESSION_PATH, 0o600)
+    except OSError:
+        pass
+    return uid
+
+
+def clear_douban_session():
+    if os.path.exists(DOUBAN_SESSION_PATH):
+        os.remove(DOUBAN_SESSION_PATH)
+
+
+def douban_session_ok(cookies):
+    opener, _jar = opener_from_cookies(cookies, follow_redirect=False)
+    req = urllib.request.Request("https://www.douban.com/settings/", headers={"User-Agent": DOUBAN_UA})
+    try:
+        with opener.open(req, timeout=15) as response:
+            return response.status == 200
     except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            raise ValueError("没有找到这个豆瓣用户")
-        if exc.code in (401, 403):
-            raise ValueError("这个片单没有公开。请在豆瓣把看过和想看设为所有人可见")
+        if exc.code in (301, 302, 303, 307, 308):
+            location = exc.headers.get("Location") or ""
+            if "accounts.douban.com" in location or "passport/login" in location:
+                return False
+            return True
         raise ValueError("豆瓣暂时没有回应")
     except ValueError:
         raise
     except Exception:
         raise ValueError("豆瓣暂时没有回应")
-    if not isinstance(data, dict) or not isinstance(data.get("interests"), list):
-        raise ValueError("豆瓣返回的内容无法识别")
+
+
+def douban_error_text(data):
+    message = str((data or {}).get("message") or "")
+    description = str((data or {}).get("description") or "")
+    if "密码" in description or "用户名" in description:
+        return "豆瓣账号或密码不对"
+    if "denied" in message.lower() or "denied" in description.lower():
+        return "豆瓣拒绝了这次登录，过几分钟再试"
+    if description and not description.isascii():
+        return description[:80]
+    return "豆瓣没有登录成功"
+
+
+def parse_collect_html(html_text, start):
+    total = 0
+    shown_end = None
+    match = re.search(
+        r"subject-num\">\s*(\d+)\s*-\s*(\d+)(?:&nbsp;|\xa0|\s)*/(?:&nbsp;|\xa0|\s)*(\d+)",
+        html_text,
+    )
+    if match:
+        shown_end = int(match.group(2))
+        total = int(match.group(3))
+    cards = []
+    for part in re.split(r'<div class="item\b', html_text)[1:]:
+        sid_match = re.search(r"/subject/(\d+)/", part)
+        em_match = re.search(r"<em>(.*?)</em>", part, re.S)
+        if not sid_match or not em_match:
+            continue
+        raw_title = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", em_match.group(1)))).strip()
+        bits = [bit.strip() for bit in raw_title.split("/") if bit.strip()]
+        if not bits:
+            continue
+        intro_match = re.search(r'class="intro">(.*?)</li>', part, re.S)
+        intro = ""
+        if intro_match:
+            intro = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", intro_match.group(1)))).strip()
+        year_match = re.search(r"(?:19|20)\d{2}", intro)
+        img_match = re.search(r'<img[^>]+src="([^"]+)"', part)
+        poster = html.unescape(img_match.group(1)) if img_match else ""
+        if poster.startswith("//"):
+            poster = "https:" + poster
+        cards.append({
+            "sid": sid_match.group(1),
+            "title": bits[0][:200],
+            "titleEn": bits[1][:200] if len(bits) > 1 else "",
+            "year": int(year_match.group(0)) if year_match else "",
+            "poster": poster if poster.startswith("http") else "",
+        })
+    if shown_end is None:
+        shown_end = start + (len(cards) or DOUBAN_GRID_PAGE)
+    return cards, total, shown_end
+
+
+def fetch_collect_page(opener, uid, status, start):
+    query = urllib.parse.urlencode({
+        "start": start,
+        "sort": "time",
+        "rating": "all",
+        "filter": "all",
+        "mode": "grid",
+    })
+    url = "https://movie.douban.com/people/%s/%s?%s" % (
+        urllib.parse.quote(uid), COLLECT_KIND[status], query,
+    )
+    req = urllib.request.Request(url, headers={
+        "User-Agent": DOUBAN_UA,
+        "Referer": "https://movie.douban.com/people/%s/" % urllib.parse.quote(uid),
+    })
     try:
-        total = int(data.get("total") or 0)
-    except (TypeError, ValueError):
-        total = 0
-    return data["interests"], max(0, total)
+        with opener.open(req, timeout=20) as response:
+            final_url = response.geturl()
+            page = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            raise ValueError("豆瓣登录已失效，请重新登录")
+        raise ValueError("豆瓣暂时没有回应")
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError("豆瓣暂时没有回应")
+    if "accounts.douban.com" in final_url:
+        raise ValueError("豆瓣登录已失效，请重新登录")
+    return parse_collect_html(page, start)
+
+
+def movie_from_card(card, status):
+    info = fetch_douban(card["sid"]) or {}
+    poster = card["poster"] if str(card.get("poster") or "").startswith("http") else ""
+    return clean_movie({
+        "title": card["title"],
+        "titleEn": card.get("titleEn") or "",
+        "year": info.get("year") if info.get("year") not in ("", None) else card.get("year", ""),
+        "type": info.get("type") or "movie",
+        "status": DOUBAN_STATUS.get(status, "watched"),
+        "director": info.get("director") or "",
+        "actors": info.get("actors") or [],
+        "regions": info.get("regions") or [],
+        "genres": info.get("genres") or [],
+        "rating": info.get("rating") if info.get("rating") not in ("", None) else "",
+        "douban": "https://movie.douban.com/subject/%s/" % card["sid"],
+        "poster": poster,
+    }, new_id())
 
 
 def count_added(movies):
@@ -498,6 +674,10 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.clean_path()
         if path == "/api/login":
             return self.handle_login()
+        if path == "/api/douban/login":
+            return self.handle_douban_login()
+        if path == "/api/douban/logout":
+            return self.handle_douban_logout()
         if path == "/api/movies/fill-ratings" or path == "/api/movies/refresh":
             return self.handle_refresh()
         if path == "/api/movies/import-douban":
@@ -582,6 +762,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"ok": True})
         if path == "/api/health":
             return self.send_json({"ok": True})
+        if path == "/api/douban/session":
+            return self.handle_douban_session()
         if path.startswith("/api/suggest"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self.handle_suggest(query.get("q", [""])[0].strip())
@@ -718,6 +900,119 @@ class Handler(SimpleHTTPRequestHandler):
                 items = current
         self.send_json({"ok": True, "filled": changed, "more": more, "items": items})
 
+    def handle_douban_session(self):
+        if not self.require_auth():
+            return
+        session = load_douban_session()
+        if not session:
+            return self.send_json({"ok": True, "loggedIn": False})
+        self.send_json({"ok": True, "loggedIn": True, "uid": session["uid"]})
+
+    def handle_douban_logout(self):
+        if not self.require_auth():
+            return
+        clear_douban_session()
+        self.send_json({"ok": True})
+
+    def douban_captcha_image(self, opener, url):
+        url = str(url or "")
+        if url.startswith("//"):
+            url = "https:" + url
+        host = urllib.parse.urlparse(url).netloc.lower()
+        if not url.startswith("http") or not (host.endswith("douban.com") or host.endswith("doubanio.com")):
+            return ""
+        try:
+            with opener.open(urllib.request.Request(url, headers={"User-Agent": DOUBAN_UA}), timeout=15) as response:
+                data = response.read()
+                ctype = (response.headers.get("Content-Type") or "image/jpeg").split(";")[0]
+        except Exception:
+            return ""
+        if not data or len(data) > 200000:
+            return ""
+        return "data:%s;base64,%s" % (ctype or "image/jpeg", base64.b64encode(data).decode("ascii"))
+
+    def handle_douban_login(self):
+        if not self.require_auth():
+            return
+        try:
+            body = self.read_json()
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        if not isinstance(body, dict):
+            return self.send_json({"error": "格式不对"}, 400)
+        account = text_of(body.get("account"), 80)
+        password = body.get("password") if isinstance(body.get("password"), str) else ""
+        password = password[:200]
+        captcha_id = text_of(body.get("captchaId"), 80)
+        captcha_solution = text_of(body.get("captcha"), 20)
+        if not account or not password:
+            return self.send_json({"error": "请填写豆瓣账号和密码"}, 400)
+        opener, jar = opener_from_cookies({})
+        try:
+            opener.open(urllib.request.Request(
+                "https://accounts.douban.com/passport/login",
+                headers={"User-Agent": DOUBAN_UA},
+            ), timeout=15).read()
+        except Exception:
+            pass
+        fields = {
+            "ck": "",
+            "name": account,
+            "password": password,
+            "remember": "true",
+            "ticket": "",
+        }
+        if captcha_id and captcha_solution:
+            fields["captcha_id"] = captcha_id
+            fields["captcha_solution"] = captcha_solution
+        req = urllib.request.Request(
+            "https://accounts.douban.com/j/mobile/login/basic",
+            data=urllib.parse.urlencode(fields).encode("utf-8"),
+            headers={
+                "User-Agent": DOUBAN_UA,
+                "Origin": "https://accounts.douban.com",
+                "Referer": "https://accounts.douban.com/passport/login",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        try:
+            with opener.open(req, timeout=20) as response:
+                raw = response.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", "replace")
+        except Exception:
+            return self.send_json({"error": "豆瓣暂时没有回应"}, 502)
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        message = str(data.get("message") or "")
+        if message == "captcha_required" or payload.get("captcha_image_url"):
+            image = self.douban_captcha_image(opener, payload.get("captcha_image_url") or "")
+            if not image:
+                return self.send_json({"error": "豆瓣验证码没有加载出来"}, 502)
+            return self.send_json({
+                "ok": False,
+                "needCaptcha": True,
+                "captchaId": payload.get("captcha_id") or "",
+                "captchaImage": image,
+            })
+        cookies = jar_dict(jar)
+        if not uid_from_cookies(cookies):
+            return self.send_json({"error": douban_error_text(data)}, 400)
+        try:
+            if not douban_session_ok(cookies):
+                return self.send_json({"error": "豆瓣没有登录成功"}, 400)
+            uid = save_douban_session(cookies)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 502)
+        self.send_json({"ok": True, "uid": uid})
+
     def handle_import_douban(self):
         if not self.require_auth():
             return
@@ -727,9 +1022,15 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"error": str(exc)}, 400)
         if not isinstance(body, dict):
             return self.send_json({"error": "格式不对"}, 400)
-        uid = parse_douban_user(body.get("user"))
-        if not uid:
-            return self.send_json({"error": "请填写豆瓣个人主页链接，或 people/ 后面的那段 ID"}, 400)
+        session = load_douban_session()
+        if not session:
+            return self.send_json({"error": "请先登录豆瓣"}, 400)
+        try:
+            if not douban_session_ok(session["cookies"]):
+                clear_douban_session()
+                return self.send_json({"error": "豆瓣登录已失效，请重新登录"}, 400)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 502)
         wanted = body.get("statuses")
         if not isinstance(wanted, list) or not wanted:
             wanted = ["done", "doing", "mark"]
@@ -751,6 +1052,8 @@ class Handler(SimpleHTTPRequestHandler):
         next_cursors = {}
         progress = {}
         deadline = time.time() + 45
+        opener, jar = opener_from_cookies(session["cookies"])
+        uid = session["uid"]
         try:
             for status in statuses:
                 raw = raw_cursors.get(status, 0)
@@ -768,42 +1071,56 @@ class Handler(SimpleHTTPRequestHandler):
                 while True:
                     if time.time() > deadline or len(fresh) >= 2000:
                         break
-                    interests, total_count = fetch_douban_interests(uid, status, start)
-                    if not interests:
-                        # 这一页是空的，但总数还没读到，就再试一次，不能当成整栏结束。
+                    cards, total_count, shown_end = fetch_collect_page(opener, uid, status, start)
+                    if not cards:
                         if total_count and read < total_count and empty_tries < 2:
                             empty_tries += 1
                             time.sleep(0.4)
                             continue
                         if not total_count or read >= total_count:
                             finished = True
-                        break
+                            break
+                        start = max(start + DOUBAN_GRID_PAGE, shown_end or 0)
+                        read = min(start, total_count) if total_count else start
+                        if total_count and start >= total_count:
+                            finished = True
+                            break
+                        continue
                     empty_tries = 0
-                    for interest in interests:
-                        movie = interest_to_movie(interest)
-                        if not movie:
-                            continue
-                        sid = subject_id_of(movie)
-                        if not sid or sid in seen:
+                    page_done = True
+                    for card in cards:
+                        sid = card["sid"]
+                        if sid in seen:
                             if sid in already_ids:
                                 skipped += 1
-                            elif sid in seen:
+                            else:
                                 duplicate += 1
+                            continue
+                        try:
+                            movie = movie_from_card(card, status)
+                        except ValueError:
                             continue
                         seen.add(sid)
                         fresh.append(movie)
-                    # 豆瓣有时一页不足 50 部，后面却还有。按实际条数往后翻，读到总数才算结束。
-                    start += len(interests)
-                    read = start
-                    if total_count and read >= total_count:
+                        if time.time() > deadline:
+                            page_done = False
+                            break
+                    if not page_done:
+                        break
+                    start = max(start + 1, shown_end)
+                    read = min(start, total_count) if total_count else start
+                    if total_count and start >= total_count:
                         finished = True
                         break
-                    time.sleep(0.15)
+                    time.sleep(0.12)
                 progress[status] = {"read": read, "total": total_count, "done": finished}
                 next_cursors[status] = -1 if finished else start
                 if not finished:
                     more = True
                     break
+            updated = jar_dict(jar)
+            if uid_from_cookies(updated):
+                save_douban_session(updated)
         except ValueError as exc:
             return self.send_json({"error": str(exc)}, 502)
         for status in statuses:
