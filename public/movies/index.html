@@ -24,6 +24,7 @@
     color: var(--text);
     font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
     min-height: 100vh;
+    padding-bottom: 88px;
   }
   button { font-family: inherit; }
 
@@ -61,8 +62,13 @@
     text-decoration: none;
   }
   .home-link:hover { color: var(--accent); }
-  body:not(.is-admin) #importBtn,
-  body:not(.is-admin) #addBtn { display: none; }
+  body:not(.is-admin) #importBtn { display: none; }
+  #loginBtn {
+    color: #111;
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
 
   /* ---------- 工具栏 ---------- */
   .toolbar {
@@ -345,7 +351,7 @@
   .fab {
     position: fixed;
     right: 32px;
-    bottom: 32px;
+    bottom: 108px;
     width: 56px;
     height: 56px;
     border-radius: 50%;
@@ -513,11 +519,19 @@
   .toast.show { opacity: 1; }
 
   footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
     text-align: center;
     color: var(--muted);
     font-size: 12px;
-    padding: 24px;
+    padding: 14px 24px;
     line-height: 1.8;
+    background: rgba(15, 17, 23, 0.94);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(8px);
   }
 
   @media (max-width: 640px) {
@@ -525,7 +539,7 @@
     .search { width: 100%; margin-left: 0; }
     header h1 { font-size: 26px; }
     .form-grid { grid-template-columns: 1fr; }
-    .fab { right: 20px; bottom: 20px; }
+    .fab { right: 20px; bottom: 108px; }
   }
 </style>
 </head>
@@ -538,7 +552,7 @@
     <a class="home-link" href="/personal/">返回个人工具</a>
   </div>
   <div class="backup-btns">
-    <button id="loginBtn" type="button">管理登录</button>
+    <button id="loginBtn" type="button">登录</button>
     <button id="exportBtn" type="button">导出备份</button>
     <button id="importBtn" type="button">导入</button>
     <input type="file" id="importFile" accept=".json" style="display:none">
@@ -758,7 +772,7 @@
     document.body.classList.toggle("is-admin", isAdmin);
     var btn = document.getElementById("loginBtn");
     if (btn) {
-      btn.textContent = isAdmin ? "退出" : "管理登录";
+      btn.textContent = isAdmin ? "退出" : "登录";
       btn.classList.toggle("on", isAdmin);
     }
     if (loaded) render();
@@ -980,7 +994,7 @@
     if (!list.length) {
       var emptyText = items.length
         ? "没有符合筛选的影片"
-        : (isAdmin ? "这里空空如也，点击右下角 + 添加第一部吧" : "还没有片单");
+        : (isAdmin ? "这里空空如也，点击右下角 + 添加第一部吧" : "还没有片单。点右上角「登录」，或点右下角 +");
       mainEl.innerHTML = '<div class="empty-all">' + emptyText + '</div>';
     } else {
       var pages = Math.ceil(list.length / PAGE_SIZE);
@@ -1025,8 +1039,21 @@
     formTitle.textContent = title;
   }
 
+  var openAddAfterLogin = false;
+
+  function openLogin() {
+    loginError.textContent = "";
+    document.getElementById("loginPassword").value = "";
+    loginMask.classList.add("show");
+    setTimeout(function () { document.getElementById("loginPassword").focus(); }, 50);
+  }
+
   function openModal() {
-    if (!mustAdmin()) return;
+    if (!isAdmin) {
+      openAddAfterLogin = true;
+      openLogin();
+      return;
+    }
     editingId = null;
     showSearchView();
     resultList.innerHTML = "";
@@ -1427,10 +1454,8 @@
       toast("已退出，现在只能查看");
       return;
     }
-    loginError.textContent = "";
-    document.getElementById("loginPassword").value = "";
-    loginMask.classList.add("show");
-    setTimeout(function () { document.getElementById("loginPassword").focus(); }, 50);
+    openAddAfterLogin = false;
+    openLogin();
   });
   document.getElementById("loginCancel").addEventListener("click", function () {
     loginMask.classList.remove("show");
@@ -1450,6 +1475,10 @@
       loginMask.classList.remove("show");
       setLoggedIn(true);
       toast("已登录，可以添加和删除了");
+      if (openAddAfterLogin) {
+        openAddAfterLogin = false;
+        openModal();
+      }
     }).catch(function (err) {
       loginError.textContent = err.message || "登录失败";
     });
