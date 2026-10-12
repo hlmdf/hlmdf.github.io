@@ -379,6 +379,10 @@ export const profile = {
       name: { zh: "网络测速", en: "Speed test" },
       href: "/speedtest/?v=2",
     },
+    {
+      name: { zh: "文件中转站", en: "File drop" },
+      href: "https://47.103.222.155:5002",
+    },
   ] as PersonalTool[],
   sites: [
     {
