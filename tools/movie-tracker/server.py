@@ -931,6 +931,19 @@ def subject_id_of(movie):
     return match.group(1) if match else ""
 
 
+def listed_status(items, movie):
+    """看过、在看、想看里已经有同一部时，返回它现在的状态。"""
+    sid = subject_id_of(movie)
+    if not sid:
+        return ""
+    for item in items:
+        if subject_id_of(item) != sid:
+            continue
+        status = item.get("status") or ""
+        return status if status in PAGE_STATUS_TO_DOUBAN else "watched"
+    return ""
+
+
 def client_ip_of(handler):
     return handler.client_address[0]
 
@@ -1120,9 +1133,13 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"error": str(exc)}, 500)
             if len(items) >= 5000:
                 return self.send_json({"error": "片单已经太多了"}, 400)
+            listed = listed_status(items, movie)
             items.append(movie)
             save_movies(items)
-        douban_sync = self.sync_new_movie(movie) if sync else None
+        if sync and listed:
+            douban_sync = {"ok": True, "skipped": True, "status": listed}
+        else:
+            douban_sync = self.sync_new_movie(movie) if sync else None
         self.send_json({"ok": True, "item": movie, "items": items, "doubanSync": douban_sync})
 
     def sync_new_movie(self, movie):

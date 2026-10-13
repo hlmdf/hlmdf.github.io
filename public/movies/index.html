@@ -1586,13 +1586,15 @@
     return match ? match[1] : "";
   }
 
-  function finishAdd(res, data, el) {
+  function finishAdd(res, data, el, note) {
     saving = false;
     applyList(res);
     var rating = res.item && res.item.rating !== "" && res.item.rating != null ? "，豆瓣 " + res.item.rating : "";
-    var syncNote = "";
-    if (res.doubanSync && res.doubanSync.ok) syncNote = "，已同步到豆瓣「" + statusName(data.status) + "」";
-    else if (res.doubanSync && res.doubanSync.ok === false) syncNote = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+    var syncNote = note || "";
+    if (!syncNote && res.doubanSync && res.doubanSync.skipped) {
+      syncNote = "。「" + statusName(res.doubanSync.status) + "」里已经有这部，没有再写进豆瓣";
+    } else if (!syncNote && res.doubanSync && res.doubanSync.ok) syncNote = "，已同步到豆瓣「" + statusName(data.status) + "」";
+    else if (!syncNote && res.doubanSync && res.doubanSync.ok === false) syncNote = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
     if (el) {
       el.classList.add("added");
       var tag = el.querySelector(".rtype");
@@ -1600,13 +1602,13 @@
     } else {
       closeModal();
     }
-    toast("已添加《" + data.title + "》" + rating + syncNote, syncNote.indexOf("没写进") === -1 ? 2200 : 4200);
+    toast("已添加《" + data.title + "》" + rating + syncNote, syncNote.indexOf("写进豆瓣") === -1 ? 2200 : 4200);
   }
 
-  function postMovie(data, sync, el) {
+  function postMovie(data, sync, el, note) {
     saving = true;
     api("/api/movies", { method: "POST", body: Object.assign({}, data, { syncDouban: !!sync }) }).then(function (res) {
-      finishAdd(res, data, el);
+      finishAdd(res, data, el, note);
     }).catch(function (err) {
       saving = false;
       toast(err.message || "添加失败");
@@ -1620,9 +1622,23 @@
     setTimeout(function () { document.getElementById("doubanPhone").focus(); }, 50);
   }
 
+  function listedCopy(data) {
+    var sid = doubanSubjectId(data.douban);
+    if (!sid) return null;
+    for (var i = 0; i < items.length; i++) {
+      if (doubanSubjectId(items[i].douban) === sid) return items[i];
+    }
+    return null;
+  }
+
   function addMovie(data, el) {
     if (!mustAdmin() || saving) return;
     var sid = doubanSubjectId(data.douban);
+    var listed = listedCopy(data);
+    if (listed) {
+      postMovie(data, false, el, "。「" + statusName(listed.status) + "」里已经有这部，没有再写进豆瓣");
+      return;
+    }
     if (!sid) {
       askConfirm("这部没有豆瓣链接，只能加在这个页面上，不会同步到豆瓣。", function () {
         postMovie(data, false, el);
