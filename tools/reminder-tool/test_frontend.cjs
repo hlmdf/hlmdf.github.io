@@ -31,7 +31,7 @@ const context = {
     let data;
     if (url === 'api/session') data = { authenticated: true, csrf: 'csrf-test' };
     else if (url === 'api/reminders') data = options.method === 'POST' ? { id: 'created' } : [];
-    else if (url === 'api/settings') data = { email: { configured: configured.email }, wecom: { webhook_configured: true, configured: configured.wecom } };
+    else if (url === 'api/settings') data = { email: { configured: configured.email }, wecom: { webhook_configured: true, configured: configured.wecom }, serverchan: {sendkey_configured: true, configured: false}, pushplus: {token_configured: true, configured: false} };
     else if (url === 'api/test') data = { ok: true };
     else if (url === 'api/password') {
       if (failPassword) return { ok: false, status: 400, json: async () => ({ error: '当前密码不正确' }) };
@@ -63,11 +63,23 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(JSON.parse(calls[saveIndex].options.body).wecom.webhook, 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key');
   assert.equal(node('s-wecom-webhook').value, '', 'Saved webhook must not stay in the input');
   assert.ok(node('s-wecom-webhook').placeholder.includes('已保存'));
+  for (const [channel, id, field] of [['serverchan', 's-serverchan-key', 'sendkey'], ['pushplus', 's-pushplus-token', 'token']]) {
+    assert.ok(node('channels-row').innerHTML.includes('data-ch="' + channel + '"'));
+    node(id).value = 'test-secret';
+    const before = calls.length;
+    await context.window.testChannel(channel);
+    const sent = calls.slice(before);
+    assert.equal(JSON.parse(sent[0].options.body)[channel][field], 'test-secret');
+    assert.ok(sent.findIndex(c => c.url === 'api/test') > 0);
+    assert.equal(node(id).value, '');
+  }
   node('f-content').value = '测试提醒'; node('f-time').value = '09:00'; node('f-rule-type').value = 'daily';
-  selectedChannels = ['email', 'wecom'];
+  selectedChannels = ['email', 'wecom', 'serverchan', 'pushplus'];
   await node('btn-save').onclick();
   assert.ok(node('channel-validation').textContent.includes('邮件'));
   assert.ok(node('channel-validation').textContent.includes('企业微信'));
+  assert.ok(node('channel-validation').textContent.includes('Server酱'));
+  assert.ok(node('channel-validation').textContent.includes('PushPlus'));
   assert.equal(calls.filter(c => c.url === 'api/reminders' && c.options.method === 'POST').length, 0);
   selectedChannels = ['browser']; context.Notification.permission = 'denied';
   await node('btn-save').onclick();

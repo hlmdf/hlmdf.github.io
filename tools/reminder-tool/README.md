@@ -77,6 +77,10 @@ systemctl start reminder-tool
 ## 运维和边界
 
 企业微信：登录后进入“通知渠道设置”，填入企业微信群机器人的 Webhook，保存并发送测试。
+Server酱：填写 SCT 或 sctp 开头的 SendKey，支持保存、测试和定时推送。
+PushPlus：填写用户 token 或消息 token，支持保存、测试和定时推送。接口接收请求后异步投递，最终结果可在 PushPlus 查看。
+两种渠道均会在保存或启用提醒时检查配置；密钥不回显，留空保存会保留旧密钥。
+接口依据：[Server酱](https://sct.ftqq.com/docs/getting-started/sendkey/)、[PushPlus](https://www.pushplus.plus/doc/guide/api.html)。
 新建或编辑提醒时勾选“企业微信”。通知由服务器发送，关闭网页也能推送到群。
 保存或启用提醒前会校验对应通知渠道配置；邮件和企业微信缺少配置时，后端也会拒绝保存或启用。
 浏览器通知权限在当前设备的页面中检查；未授权会提示先授权，不会保存所选浏览器提醒。

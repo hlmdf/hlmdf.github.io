@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from werkzeug.security import generate_password_hash
-from server import Store, ZONE, create_app, scheduler_tick, send_wecom
+from server import Store, ZONE, create_app, scheduler_tick, send_wecom, send_serverchan, send_pushplus, serverchan_url
 from setup_auth import password_is_valid
 
 PASSWORD = "183602"
@@ -185,6 +185,47 @@ class ReminderTests(unittest.TestCase):
             self.assertTrue(self.call("/api/fire", data={"id": created.json["id"]}).json["results"]["wecom"]["ok"])
             self.assertEqual(scheduler_tick(self.store, datetime(2026, 10, 13, 9, 0, tzinfo=ZONE)), 1)
             self.assertEqual(sender.call_count, 3)
+
+    def test_restored_channels_settings_and_delivery(self):
+        self.login()
+        for channel, field, secret in (("serverchan", "sendkey", "SCTtestsecret"), ("pushplus", "token", "testtoken")):
+            with self.subTest(channel=channel):
+                self.assertEqual(self.create(channels=[channel]).status_code, 400)
+                response = self.call("/api/settings", "PUT", {channel: {field: secret}})
+                self.assertTrue(response.json[channel]["configured"])
+                self.assertNotIn(secret, response.get_data(as_text=True))
+                self.call("/api/settings", "PUT", {channel: {field: ""}})
+                self.assertEqual(self.store.settings()[channel][field], secret)
+                self.assertEqual(self.call("/api/settings", "PUT", {channel: {field: "https://bad/path"}}).status_code, 400)
+                created = self.create(channels=[channel])
+                self.assertEqual(created.status_code, 201)
+                with patch("server.send_" + channel, return_value=(True, "accepted")) as sender:
+                    self.assertTrue(self.call("/api/test", data={"channel": channel}).json["ok"])
+                    self.assertTrue(self.call("/api/fire", data={"id": created.json["id"]}).json["results"][channel]["ok"])
+                    scheduler_tick(self.store, datetime(2026, 10, 13, 9, 0, tzinfo=ZONE))
+                    self.assertEqual(sender.call_count, 3)
+
+    def test_restored_channel_payloads_and_secret_redaction(self):
+        self.assertEqual(serverchan_url("sctp123tabc"), "https://123.push.ft07.com/send/sctp123tabc.send")
+        settings = self.store.settings()
+        for channel, field, secret, sender, code in (("serverchan", "sendkey", "SCTtestsecret", send_serverchan, 0), ("pushplus", "token", "testtoken", send_pushplus, 200)):
+            self.assertFalse(sender("提醒", settings)[0])
+            settings[channel][field] = secret
+            opener = MagicMock()
+            with patch("server.urllib.request.build_opener", return_value=opener):
+                opener.open.return_value.__enter__.return_value.read.return_value = json.dumps({"code": code}).encode()
+                self.assertTrue(sender("测试 & 提醒", settings)[0])
+                req = opener.open.call_args.args[0]
+                self.assertTrue(req.full_url.startswith("https://"))
+                if channel == "pushplus":
+                    self.assertEqual(json.loads(req.data)["content"], "测试 & 提醒")
+                else:
+                    from urllib.parse import parse_qs
+                    self.assertEqual(parse_qs(req.data.decode())["desp"], ["测试 & 提醒"])
+                opener.open.return_value.__enter__.return_value.read.return_value = json.dumps({"code": 400, "msg": secret}).encode()
+                self.assertNotIn(secret, sender("提醒", settings)[1])
+                opener.open.side_effect = OSError(secret)
+                self.assertNotIn(secret, sender("提醒", settings)[1])
 
     def test_wecom_payload_and_sanitized_errors(self):
         settings = self.store.settings()

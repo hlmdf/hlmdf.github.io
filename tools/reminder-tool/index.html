@@ -243,11 +243,10 @@
         </div>
       </div>
 
-      <!-- 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消本段注释
       <div class="channel-block">
         <h3>🟢 Server酱</h3>
-        <div class="hint">登录 sct.ftqq.com ，微信扫码绑定后复制 SendKey。消息通过公众号推到微信（免费版每天有条数限制）。</div>
-        <div class="row"><input type="text" id="s-serverchan-key" placeholder="SendKey，形如 SCTxxxxxx"></div>
+        <div class="hint">在 <a href="https://sct.ftqq.com/sendkey/" target="_blank" rel="noopener noreferrer">Server酱</a> 获取 SendKey 并设置接收通道。支持 SCT 和 sctp 开头的密钥；保存后可发送测试。</div>
+        <div class="row"><input type="password" id="s-serverchan-key" autocomplete="off" placeholder="请输入 SendKey（SCT 或 sctp 开头）"></div>
         <div class="channel-actions">
           <button class="btn btn-primary btn-sm" onclick="saveSettings('serverchan')">保存</button>
           <button class="btn btn-ghost btn-sm" onclick="testChannel('serverchan')">发送测试</button>
@@ -256,14 +255,13 @@
 
       <div class="channel-block">
         <h3>🟣 PushPlus</h3>
-        <div class="hint">登录 www.pushplus.plus ，微信扫码后复制 token。也是通过公众号推到微信。</div>
-        <div class="row"><input type="text" id="s-pushplus-token" placeholder="token"></div>
+        <div class="hint">登录 <a href="https://www.pushplus.plus/" target="_blank" rel="noopener noreferrer">PushPlus</a>，设置接收通道后复制 token。</div>
+        <div class="row"><input type="password" id="s-pushplus-token" autocomplete="off" placeholder="请输入 token"></div>
         <div class="channel-actions">
           <button class="btn btn-primary btn-sm" onclick="saveSettings('pushplus')">保存</button>
           <button class="btn btn-ghost btn-sm" onclick="testChannel('pushplus')">发送测试</button>
         </div>
       </div>
-      -->
 
       <div class="channel-block">
         <h3>🌐 浏览器弹窗</h3>
@@ -297,9 +295,8 @@
   const CHANNELS = [
     { key: "wecom",      name: "企业微信" },
     { key: "email",      name: "邮件" },
-    // 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消下面两行注释
-    // { key: "serverchan", name: "Server酱" },
-    // { key: "pushplus",   name: "PushPlus" },
+    { key: "serverchan", name: "Server酱" },
+    { key: "pushplus",   name: "PushPlus" },
     { key: "browser",    name: "浏览器弹窗" }
   ];
 
@@ -371,6 +368,8 @@
     $("reminder-list").textContent = "";
     $("s-email-code").value = "";
     $("s-wecom-webhook").value = "";
+    $("s-serverchan-key").value = "";
+    $("s-pushplus-token").value = "";
     $("password-form").reset();
     $("login-password").value = "";
     csrfToken = "";
@@ -471,6 +470,12 @@
     }
     if (channels.includes("wecom") && !settings.wecom.configured) {
       missing.push("企业微信：请先填写并保存机器人 Webhook 地址");
+    }
+    if (channels.includes("serverchan") && !settings.serverchan.configured) {
+      missing.push("Server酱：请先填写并保存 SendKey");
+    }
+    if (channels.includes("pushplus") && !settings.pushplus.configured) {
+      missing.push("PushPlus：请先填写并保存 token");
     }
     if (channels.includes("browser") && (!("Notification" in window) || Notification.permission !== "granted")) {
       missing.push("浏览器弹窗：请先在通知渠道设置中授权浏览器通知");
@@ -656,9 +661,10 @@
     $("s-email-code").value = "";
     $("s-email-code").placeholder = s.email.auth_code_configured ? "已保存授权码，留空保持不变" : "请输入 SMTP 授权码";
     $("s-email-to").value = s.email.to || "";
-    // 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消下面两行注释
-    // $("s-serverchan-key").value = s.serverchan.sendkey || "";
-    // $("s-pushplus-token").value = s.pushplus.token || "";
+    $("s-serverchan-key").value = "";
+    $("s-serverchan-key").placeholder = s.serverchan.sendkey_configured ? "已保存 SendKey，留空保持不变" : "请输入 SendKey（SCT 或 sctp 开头）";
+    $("s-pushplus-token").value = "";
+    $("s-pushplus-token").placeholder = s.pushplus.token_configured ? "已保存 token，留空保持不变" : "请输入 token";
   }
 
   window.saveSettings = async which => {
@@ -674,12 +680,11 @@
         to: $("s-email-to").value.trim()
       };
     }
-    // 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消下面五行注释
-    // else if (which === "serverchan") {
-    //   payload.serverchan = { sendkey: $("s-serverchan-key").value.trim() };
-    // } else if (which === "pushplus") {
-    //   payload.pushplus = { token: $("s-pushplus-token").value.trim() };
-    // }
+    else if (which === "serverchan") {
+      payload.serverchan = { sendkey: $("s-serverchan-key").value.trim() };
+    } else if (which === "pushplus") {
+      payload.pushplus = { token: $("s-pushplus-token").value.trim() };
+    }
     await api("/api/settings", "PUT", payload);
     await loadSettings();
     toast("已保存");
@@ -688,11 +693,11 @@
   window.testChannel = async ch => {
     if (ch !== "browser") {
       // 先保存当前页面上的配置再测试
-      if (["email", "wecom"].includes(ch)) {
+      if (["email", "wecom", "serverchan", "pushplus"].includes(ch)) {
         await window.saveSettings(ch);
       }
       const res = await api("/api/test", "POST", { channel: ch });
-      toast(res.ok ? "发送成功，去查收吧！" : "发送失败：" + res.message, res.ok);
+      toast(res.ok ? (res.message || "发送成功，去查收吧！") : "发送失败：" + res.message, res.ok);
     } else {
       if (!pollEpoch) await pollBrowser(true);
       await api("/api/test", "POST", { channel: "browser" });

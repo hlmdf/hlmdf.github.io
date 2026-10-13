@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo
@@ -25,7 +26,7 @@ BASE = Path(__file__).resolve().parent
 ZONE = ZoneInfo("Asia/Shanghai")
 DEFAULT_SETTINGS = {"email": {"smtp_host": "smtp.qq.com", "smtp_port": 465,
                               "account": "", "auth_code": "", "to": ""},
-                    "wecom": {"webhook": ""}}
+                    "wecom": {"webhook": ""}, "serverchan": {"sendkey": ""}, "pushplus": {"token": ""}}
 
 
 def atomic_json(path, value):
@@ -83,14 +84,16 @@ def notification_readiness(settings):
     return {"email": all(isinstance(email.get(k), str) and email[k].strip()
                          for k in ("smtp_host", "account", "auth_code", "to"))
                      and type(email.get("smtp_port")) is int and 1 <= email["smtp_port"] <= 65535,
-            "wecom": valid_wecom_webhook(settings["wecom"].get("webhook", ""))}
+            "wecom": valid_wecom_webhook(settings["wecom"].get("webhook", "")),
+            "serverchan": bool(serverchan_url(settings["serverchan"].get("sendkey", ""))),
+            "pushplus": valid_pushplus_token(settings["pushplus"].get("token", ""))}
 
 
 def require_channels_ready(store, item):
     if not item.get("enabled", True):
         return
     ready = notification_readiness(store.settings())
-    names = {"email": "邮件", "wecom": "企业微信机器人"}
+    names = {"email": "邮件", "wecom": "企业微信机器人", "serverchan": "Server酱", "pushplus": "PushPlus"}
     missing = [names[ch] for ch in item["channels"] if ch in names and not ready[ch]]
     if missing:
         abort(400, "、".join(missing) + "尚未配置完整，请先到通知渠道设置中填写并保存")
@@ -102,6 +105,8 @@ def public_settings(store):
         result[channel]["configured"] = bool(ready)
     result["email"]["auth_code_configured"] = bool(result["email"].pop("auth_code", ""))
     result["wecom"]["webhook_configured"] = bool(result["wecom"].pop("webhook", ""))
+    result["serverchan"]["sendkey_configured"] = bool(result["serverchan"].pop("sendkey", ""))
+    result["pushplus"]["token_configured"] = bool(result["pushplus"].pop("token", ""))
     return result
 
 
@@ -138,6 +143,63 @@ def send_wecom(content, settings):
         return False, "企业微信发送失败，请检查 Webhook 地址及服务器网络"
 
 
+def serverchan_url(key):
+    if not isinstance(key, str) or len(key) > 512:
+        return ""
+    if re.fullmatch(r"SCT[A-Za-z0-9_-]+", key):
+        return "https://sctapi.ftqq.com/%s.send" % key
+    match = re.fullmatch(r"sctp([0-9]{1,20})t[A-Za-z0-9_-]+", key)
+    if match:
+        return "https://%s.push.ft07.com/send/%s.send" % (match.group(1), key)
+    return ""
+
+
+def send_serverchan(content, settings):
+    url = serverchan_url(settings["serverchan"].get("sendkey", ""))
+    if not url:
+        return False, "请先配置 Server酱 SendKey"
+    payload = urllib.parse.urlencode({"title": "提醒通知", "desp": content}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        code = result.get("code")
+        if type(code) is int and code == 0:
+            return True, ""
+        message = "Server酱发送失败，请检查 SendKey、推送通道和可用额度"
+        if type(code) is int:
+            message += "（错误码 %s）" % code
+        return False, message
+    except Exception:
+        return False, "Server酱发送失败，请检查配置及服务器网络"
+
+
+def valid_pushplus_token(token):
+    return isinstance(token, str) and bool(re.fullmatch(r"[A-Za-z0-9_-]{1,512}", token))
+
+
+def send_pushplus(content, settings):
+    token = settings["pushplus"].get("token", "")
+    if not valid_pushplus_token(token):
+        return False, "请先配置 PushPlus token"
+    payload = json.dumps({"token": token, "title": "提醒通知", "content": content,
+                          "template": "txt"}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request("https://www.pushplus.plus/send", data=payload,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        code = result.get("code")
+        if type(code) is int and code == 200:
+            return True, "PushPlus 已接收推送请求，请留意消息；最终投递结果可在 PushPlus 查看"
+        message = "PushPlus 发送失败，请检查 token、接收通道和可用额度"
+        if type(code) is int:
+            message += "（错误码 %s）" % code
+        return False, message
+    except Exception:
+        return False, "PushPlus 发送失败，请检查配置及服务器网络"
+
+
 def send_email(content, settings):
     cfg = settings["email"]
     if not all(cfg.get(k) for k in ("account", "auth_code", "to")):
@@ -165,8 +227,8 @@ def fire_reminder(store, reminder, trigger):
         if channel == "browser":
             store.browser_event(reminder, trigger)
             results[channel] = {"ok": True, "message": ""}
-        elif channel in ("email", "wecom"):
-            sender = send_email if channel == "email" else send_wecom
+        elif channel in ("email", "wecom", "serverchan", "pushplus"):
+            sender = {"email": send_email, "wecom": send_wecom, "serverchan": send_serverchan, "pushplus": send_pushplus}[channel]
             ok, message = sender("【%s】%s" % (trigger, reminder["content"]), store.settings())
             results[channel] = {"ok": ok, "message": message}
     return results
@@ -229,8 +291,8 @@ def validate_reminder(item):
         if not isinstance(days, list) or not days or not all(type(d) is int and 0 <= d <= 6 for d in days):
             abort(400, "请选择有效的星期")
     channels = item.get("channels")
-    if not isinstance(channels, list) or not channels or not all(c in ("browser", "email", "wecom") for c in channels):
-        abort(400, "请选择邮件、企业微信或浏览器通知")
+    if not isinstance(channels, list) or not channels or not all(c in ("browser", "email", "wecom", "serverchan", "pushplus") for c in channels):
+        abort(400, "请选择邮件、企业微信、Server酱、PushPlus或浏览器通知")
     item["channels"] = list(dict.fromkeys(channels))
     if type(item.get("enabled")) is not bool:
         abort(400, "启用状态不正确")
@@ -404,7 +466,7 @@ def create_app(config=None):
                 for channel, incoming in data.items():
                     cfg = value[channel]
                     for key in cfg:
-                        if key in incoming and not (key in ("auth_code", "webhook") and incoming[key] == ""):
+                        if key in incoming and not (key in ("auth_code", "webhook", "sendkey", "token") and incoming[key] == ""):
                             cfg[key] = incoming[key]
                 cfg = value["email"]
                 for key in ("smtp_host", "account", "auth_code", "to"):
@@ -415,6 +477,12 @@ def create_app(config=None):
                 webhook = value["wecom"]["webhook"]
                 if not isinstance(webhook, str) or len(webhook) > 2048 or (webhook and not valid_wecom_webhook(webhook)):
                     abort(400, "企业微信 Webhook 地址不正确，请复制完整的机器人地址")
+                key = value["serverchan"]["sendkey"]
+                if not isinstance(key, str) or (key and not serverchan_url(key)):
+                    abort(400, "Server酱 SendKey 格式不正确，请复制 SCT 或 sctp 开头的完整密钥")
+                token = value["pushplus"]["token"]
+                if not isinstance(token, str) or (token and not valid_pushplus_token(token)):
+                    abort(400, "PushPlus token 格式不正确，请复制完整的 token")
                 store.write("settings", value)
         return jsonify(public_settings(store))
 
@@ -432,7 +500,7 @@ def create_app(config=None):
     @app.post("/api/test")
     def test_channel():
         channel = body().get("channel")
-        if channel not in ("browser", "email", "wecom"):
+        if channel not in ("browser", "email", "wecom", "serverchan", "pushplus"):
             abort(400, "未知渠道")
         result = fire_reminder(store, {"id": "test", "content": "这是一条提醒测试", "channels": [channel]},
                                datetime.now(ZONE).strftime("%Y-%m-%d %H:%M"))
