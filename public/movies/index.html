@@ -63,6 +63,8 @@
     text-decoration: none;
   }
   .home-link:hover { color: var(--accent); }
+  .header-links { display: flex; flex-wrap: wrap; gap: 16px; }
+  .douban-shortcut { color: #42bd56; }
   body:not(.is-admin) #importBtn,
   body:not(.is-admin) #doubanImportBtn,
   body:not(.is-admin) #updateBtn,
@@ -728,7 +730,10 @@
   <div class="title-block">
     <h1>我的<span>片单</span></h1>
     <p>记录看过的、想看的电影和电视剧 · 点击卡片查看详情</p>
-    <a class="home-link" href="/personal/">返回个人工具</a>
+    <nav class="header-links" aria-label="快捷导航">
+      <a class="home-link" href="/personal/">返回个人工具</a>
+      <a class="home-link douban-shortcut" href="https://movie.douban.com/" target="_blank" rel="noopener noreferrer">豆瓣电影 ↗</a>
+    </nav>
   </div>
   <div class="backup-btns">
     <button id="loginBtn" type="button">登录</button>
