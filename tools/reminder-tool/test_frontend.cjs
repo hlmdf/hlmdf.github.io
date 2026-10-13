@@ -15,8 +15,10 @@ const node = id => {
   return elements.get(id);
 };
 let timers = [], calls = [], notifications = [], pollCount = 0, failPassword = false;
+let selectedChannels = [], configured = { email: false, wecom: false };
 const context = {
-  document: { getElementById: node, querySelectorAll: () => [],
+  document: { getElementById: node, querySelectorAll: selector => selector === '#channels-row input:checked'
+    ? selectedChannels.map(value => ({ value })) : [],
     createElement: () => ({ set textContent(value) { this.innerHTML = String(value); } }) },
   window: { addEventListener() {}, scrollTo() {} },
   setTimeout: (callback, delay) => { const t = { callback, delay }; timers.push(t); return t; },
@@ -28,8 +30,8 @@ const context = {
     assert.ok(!url.startsWith('/'), 'API must stay under the deployed subpath');
     let data;
     if (url === 'api/session') data = { authenticated: true, csrf: 'csrf-test' };
-    else if (url === 'api/reminders') data = [];
-    else if (url === 'api/settings') data = { email: {}, wecom: { webhook_configured: true } };
+    else if (url === 'api/reminders') data = options.method === 'POST' ? { id: 'created' } : [];
+    else if (url === 'api/settings') data = { email: { configured: configured.email }, wecom: { webhook_configured: true, configured: configured.wecom } };
     else if (url === 'api/test') data = { ok: true };
     else if (url === 'api/password') {
       if (failPassword) return { ok: false, status: 400, json: async () => ({ error: '当前密码不正确' }) };
@@ -61,6 +63,20 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(JSON.parse(calls[saveIndex].options.body).wecom.webhook, 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key');
   assert.equal(node('s-wecom-webhook').value, '', 'Saved webhook must not stay in the input');
   assert.ok(node('s-wecom-webhook').placeholder.includes('已保存'));
+  node('f-content').value = '测试提醒'; node('f-time').value = '09:00'; node('f-rule-type').value = 'daily';
+  selectedChannels = ['email', 'wecom'];
+  await node('btn-save').onclick();
+  assert.ok(node('channel-validation').textContent.includes('邮件'));
+  assert.ok(node('channel-validation').textContent.includes('企业微信'));
+  assert.equal(calls.filter(c => c.url === 'api/reminders' && c.options.method === 'POST').length, 0);
+  selectedChannels = ['browser']; context.Notification.permission = 'denied';
+  await node('btn-save').onclick();
+  assert.ok(node('channel-validation').textContent.includes('授权浏览器通知'));
+  assert.equal(calls.filter(c => c.url === 'api/reminders' && c.options.method === 'POST').length, 0);
+  selectedChannels = ['wecom']; configured.wecom = true; context.Notification.permission = 'granted';
+  await node('btn-save').onclick();
+  await flush();
+  assert.equal(calls.filter(c => c.url === 'api/reminders' && c.options.method === 'POST').length, 1);
   failPassword = true;
   node('p-current').value = 'wrong'; node('p-new').value = 'abc'; node('p-confirm').value = 'abc';
   await node('password-form').onsubmit({ preventDefault() {} });
@@ -86,5 +102,5 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(node('login-panel').hidden, false);
   assert.ok(node('login-error').textContent.includes('新密码'));
   assert.ok(!timers.some(t => t.delay === 15000), 'Logout must stop notification polling');
-  console.log('PASS: WeCom save/test flow and secret hiding, password-change logout, polling, network retry');
+  console.log('PASS: missing channel configuration and notification permission block saves; configured channels save; password logout and polling');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -184,6 +184,7 @@
 
       <label class="field-label">通知方式（先到「通知渠道设置」填好配置）</label>
       <div class="checkbox-row" id="channels-row"></div>
+      <p id="channel-validation" role="alert" hidden style="color:#c0392b;font-size:14px;line-height:1.7;margin-top:10px"></p>
 
       <div style="margin-top:20px; display:flex; gap:12px;">
         <button class="btn btn-primary" id="btn-save">保存提醒</button>
@@ -462,12 +463,32 @@
       .map(i => i.value);
   }
 
+  async function ensureChannelsReady(channels) {
+    const settings = await api("/api/settings");
+    const missing = [];
+    if (channels.includes("email") && !settings.email.configured) {
+      missing.push("邮件：请先填写并保存 SMTP 地址、端口、发信账号、授权码和收信邮箱");
+    }
+    if (channels.includes("wecom") && !settings.wecom.configured) {
+      missing.push("企业微信：请先填写并保存机器人 Webhook 地址");
+    }
+    if (channels.includes("browser") && (!("Notification" in window) || Notification.permission !== "granted")) {
+      missing.push("浏览器弹窗：请先在通知渠道设置中授权浏览器通知");
+    }
+    $("channel-validation").textContent = missing.join("；");
+    $("channel-validation").hidden = missing.length === 0;
+    if (missing.length) toast("所选通知方式尚未设置好，请先完成配置", false);
+    return missing.length === 0;
+  }
+
   function resetForm() {
     editingId = null;
     $("form-title").textContent = "新建提醒";
     $("btn-save").textContent = "保存提醒";
     $("btn-cancel-edit").style.display = "none";
     $("f-content").value = "";
+    $("channel-validation").textContent = "";
+    $("channel-validation").hidden = true;
     $("f-time").value = "09:00";
     $("f-rule-type").value = "daily";
     $("f-rule-type").onchange();
@@ -493,6 +514,7 @@
       toast("请至少勾选一个星期几", false); return;
     }
     if (channels.length === 0) { toast("请至少选择一种通知方式", false); return; }
+    if (!(await ensureChannelsReady(channels))) return;
 
     if (editingId) {
       await api("/api/reminders/" + editingId, "PUT",
@@ -564,8 +586,12 @@
   }
 
   window.toggleEnabled = async (id, enabled) => {
-    await api("/api/reminders/" + id, "PUT", { enabled });
-    loadReminders();
+    try {
+      const item = reminders.find(r => r.id === id);
+      if (enabled && item && !(await ensureChannelsReady(item.channels))) return;
+      await api("/api/reminders/" + id, "PUT", { enabled });
+    } catch (error) { toast(error.message, false); }
+    finally { await loadReminders(); }
   };
 
   window.startEdit = id => {

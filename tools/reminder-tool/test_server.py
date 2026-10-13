@@ -177,6 +177,7 @@ class ReminderTests(unittest.TestCase):
 
     def test_wecom_test_manual_and_scheduled_notifications(self):
         self.login()
+        self.call("/api/settings", "PUT", {"wecom": {"webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key"}})
         created = self.create(channels=["wecom"])
         self.assertEqual(created.status_code, 201)
         with patch("server.send_wecom", return_value=(True, "")) as sender:
@@ -205,6 +206,34 @@ class ReminderTests(unittest.TestCase):
             opener.open.side_effect = OSError(settings["wecom"]["webhook"])
             self.assertNotIn("secret-test-key", send_wecom("提醒", settings)[1])
 
+    def test_reminders_require_all_selected_channels_to_be_configured(self):
+        self.login()
+        flags = self.client.get("/api/settings").json
+        self.assertFalse(flags["email"]["configured"])
+        self.assertFalse(flags["wecom"]["configured"])
+        for channels in (["email"], ["wecom"], ["browser", "email", "wecom"]):
+            result = self.create(channels=channels)
+            self.assertEqual(result.status_code, 400)
+            self.assertIn("尚未配置完整", result.json["error"])
+        self.assertEqual(self.client.get("/api/reminders").json, [])
+        self.call("/api/settings", "PUT", {"email": {"account": "sender@example.com"}})
+        self.assertEqual(self.create(channels=["email"]).status_code, 400)
+        self.call("/api/settings", "PUT", {"email": {"auth_code": "test-code", "to": "receiver@example.com"},
+                                                "wecom": {"webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key"}})
+        flags = self.client.get("/api/settings").json
+        self.assertTrue(flags["email"]["configured"])
+        self.assertTrue(flags["wecom"]["configured"])
+        self.assertEqual(self.create(channels=["email", "wecom"]).status_code, 201)
+
+    def test_edit_and_enable_check_configuration_without_losing_old_reminder(self):
+        self.login()
+        rid = self.create().json["id"]
+        self.assertEqual(self.call("/api/reminders/" + rid, "PUT", {"channels": ["wecom"]}).status_code, 400)
+        self.assertEqual(self.client.get("/api/reminders").json[0]["channels"], ["browser"])
+        self.assertEqual(self.call("/api/reminders/" + rid, "PUT", {"enabled": False, "channels": ["wecom"]}).status_code, 200)
+        self.assertEqual(self.call("/api/reminders/" + rid, "PUT", {"enabled": True}).status_code, 400)
+        self.assertFalse(self.client.get("/api/reminders").json[0]["enabled"])
+
     def test_browser_scheduler_does_not_deadlock_or_duplicate(self):
         self.login()
         self.create()
@@ -229,6 +258,7 @@ class ReminderTests(unittest.TestCase):
 
     def test_sending_email_does_not_hold_data_lock(self):
         self.login()
+        self.call("/api/settings", "PUT", {"email": {"account": "sender@example.com", "auth_code": "test-code", "to": "receiver@example.com"}})
         self.create(channels=["email"])
         entered, release = threading.Event(), threading.Event()
         def slow_email(*args):

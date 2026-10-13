@@ -78,8 +78,28 @@ class Store:
             self.events = self.events[-100:]
 
 
+def notification_readiness(settings):
+    email = settings["email"]
+    return {"email": all(isinstance(email.get(k), str) and email[k].strip()
+                         for k in ("smtp_host", "account", "auth_code", "to"))
+                     and type(email.get("smtp_port")) is int and 1 <= email["smtp_port"] <= 65535,
+            "wecom": valid_wecom_webhook(settings["wecom"].get("webhook", ""))}
+
+
+def require_channels_ready(store, item):
+    if not item.get("enabled", True):
+        return
+    ready = notification_readiness(store.settings())
+    names = {"email": "邮件", "wecom": "企业微信机器人"}
+    missing = [names[ch] for ch in item["channels"] if ch in names and not ready[ch]]
+    if missing:
+        abort(400, "、".join(missing) + "尚未配置完整，请先到通知渠道设置中填写并保存")
+
+
 def public_settings(store):
     result = store.settings()
+    for channel, ready in notification_readiness(result).items():
+        result[channel]["configured"] = bool(ready)
     result["email"]["auth_code_configured"] = bool(result["email"].pop("auth_code", ""))
     result["wecom"]["webhook_configured"] = bool(result["wecom"].pop("webhook", ""))
     return result
@@ -350,6 +370,7 @@ def create_app(config=None):
             item.update(id=uuid.uuid4().hex, enabled=True, last_fired=None,
                         created_at=datetime.now(ZONE).strftime("%Y-%m-%d %H:%M:%S"))
             validate_reminder(item)
+            require_channels_ready(store, item)
             items.append(item)
             store.write("reminders", items)
             return jsonify(item), 201
@@ -367,6 +388,7 @@ def create_app(config=None):
                 data = body()
                 item.update({k: data[k] for k in ("content", "time", "rule", "channels", "enabled") if k in data})
                 validate_reminder(item)
+                require_channels_ready(store, item)
                 # Do not reset last_fired: editing in the same minute must not resend.
             store.write("reminders", items)
             return jsonify(ok=True) if request.method == "DELETE" else jsonify(item)
