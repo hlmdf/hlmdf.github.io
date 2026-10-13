@@ -296,9 +296,9 @@ def new_id():
 SUBJECT_RE = re.compile(r"subject/(\d+)")
 
 
-def suggest_douban(keyword):
+def suggest_douban(keyword, start=0):
     """豆瓣原来的 subject_suggest 现在直接返回空列表，改走移动端搜索。"""
-    url = "https://m.douban.com/rexxar/api/v2/search/movie?q=%s&count=10" % urllib.parse.quote(keyword)
+    url = "https://m.douban.com/rexxar/api/v2/search/movie?q=%s&count=10&start=%d" % (urllib.parse.quote(keyword), start)
     req = urllib.request.Request(url, headers={
         "User-Agent": DOUBAN_UA,
         "Referer": "https://m.douban.com/search/",
@@ -325,9 +325,10 @@ def suggest_douban(keyword):
             "url": "https://movie.douban.com/subject/%s/" % sid,
             "episode": "1" if kind == "tv" else "",
         })
-        if len(out) >= 8:
-            break
-    return out
+    next_start = start + len(items)
+    total = data.get("total")
+    has_more = bool(items) and (next_start < total if isinstance(total, int) else len(items) >= 10)
+    return {"results": out, "nextStart": next_start, "hasMore": has_more}
 
 
 def fetch_douban(subject_id):
@@ -1153,7 +1154,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.handle_douban_session()
         if path.startswith("/api/suggest"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            return self.handle_suggest(query.get("q", [""])[0].strip())
+            return self.handle_suggest(query.get("q", [""])[0].strip(), query.get("start", ["0"])[0])
         if path.startswith("/api/img"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self.handle_img(query.get("url", [""])[0])
@@ -1664,11 +1665,17 @@ class Handler(SimpleHTTPRequestHandler):
             save_movies(items)
         self.send_json({"ok": True, "items": items})
 
-    def handle_suggest(self, keyword):
-        if not keyword:
-            return self.send_json([])
+    def handle_suggest(self, keyword, start="0"):
         try:
-            out = suggest_douban(keyword)
+            start = int(start)
+            if start < 0 or start > 100000:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return self.send_json({"error": "搜索页码不正确"}, 400)
+        if not keyword:
+            return self.send_json({"results": [], "nextStart": start, "hasMore": False})
+        try:
+            out = suggest_douban(keyword, start)
         except Exception:
             return self.send_json({"error": "豆瓣搜索暂时没有回应"}, 502)
         self.send_json(out)

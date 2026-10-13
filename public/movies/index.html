@@ -800,6 +800,7 @@
       </div>
       <div class="search-status" id="searchStatus"></div>
       <div class="result-list" id="resultList"></div>
+      <button type="button" id="searchMoreBtn" class="btn-cancel" hidden style="width:100%;margin-top:12px;padding:10px;cursor:pointer">加载更多</button>
       <div class="switch-line">没找到想要的？<a id="toManualLink">手动填写 →</a></div>
     </div>
 
@@ -1445,6 +1446,7 @@
     resultList.innerHTML = "";
     searchStatus.textContent = "";
     doubanSearchInput.value = "";
+    resetSearch("");
     mask.classList.add("show");
     setTimeout(function () { doubanSearchInput.focus(); }, 50);
   }
@@ -1519,17 +1521,26 @@
     }).filter(Boolean);
   }
 
-  function doubanSearch(kw) {
+  function normalizeSearchPage(data, start) {
+    if (data && Array.isArray(data.results)) return data;
+    if (!data || !Array.isArray(data.items)) throw new Error("搜索接口尚未更新");
+    var next = start + data.items.length;
+    return { results: normalizeSuggest(data), nextStart: next,
+      hasMore: data.items.length > 0 && (typeof data.total === "number" ? next < data.total : data.items.length >= 10) };
+  }
+
+  function doubanSearch(kw, start) {
+    start = start || 0;
     var q = encodeURIComponent(kw);
-    var rexxar = "https://m.douban.com/rexxar/api/v2/search/movie?q=" + q + "&count=10";
+    var rexxar = "https://m.douban.com/rexxar/api/v2/search/movie?q=" + q + "&count=10&start=" + start;
     var sources = [
-      apiOrigin() + "/api/suggest?q=" + q,
+      apiOrigin() + "/api/suggest?q=" + q + "&start=" + start,
       "https://api.allorigins.win/raw?url=" + encodeURIComponent(rexxar),
       "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(rexxar)
     ];
     var index = 0;
     function step() {
-      if (index >= sources.length) return Promise.resolve([]);
+      if (index >= sources.length) return Promise.reject(new Error("搜索暂时不可用，请稍后重试"));
       var url = sources[index];
       index += 1;
       var controller = new AbortController();
@@ -1539,9 +1550,7 @@
         if (!resp.ok) throw new Error("http " + resp.status);
         return resp.json();
       }).then(function (data) {
-        var list = normalizeSuggest(data);
-        if (!list.length) return step();
-        return list;
+        return normalizeSearchPage(data, start);
       }).catch(function () {
         clearTimeout(timer);
         return step();
@@ -1552,10 +1561,63 @@
 
   var searchSeq = 0;
   var searchTimer = null;
+  var searchMoreBtn = document.getElementById("searchMoreBtn");
+  var searchNextStart = 0;
+  var searchHasMore = false;
+  var searchLoading = false;
+
+  function resetSearch(kw) {
+    clearTimeout(searchTimer);
+    searchSeq += 1;
+    lastSearchList = [];
+    lastSearchKeyword = kw;
+    searchNextStart = 0;
+    searchHasMore = false;
+    searchLoading = false;
+    resultList.innerHTML = "";
+    updateSearchMore();
+  }
+
+  function updateSearchMore() {
+    searchMoreBtn.hidden = !searchHasMore;
+    searchMoreBtn.disabled = searchLoading;
+    searchMoreBtn.textContent = searchLoading ? "加载中…" : "加载更多";
+  }
+
+  function appendSearchPage(page, kw) {
+    var seen = new Set(lastSearchList.map(function (item) { return item.url; }));
+    var combined = lastSearchList.slice();
+    page.results.forEach(function (item) {
+      if (!seen.has(item.url)) { seen.add(item.url); combined.push(item); }
+    });
+    searchHasMore = page.hasMore && page.nextStart > searchNextStart;
+    searchNextStart = page.nextStart;
+    renderSearchResults(combined, kw);
+  }
+
+  searchMoreBtn.addEventListener("click", function () {
+    if (searchLoading || !searchHasMore) return;
+    var seq = searchSeq;
+    var kw = lastSearchKeyword;
+    searchLoading = true;
+    updateSearchMore();
+    doubanSearch(kw, searchNextStart).then(function (page) {
+      if (seq !== searchSeq) return;
+      appendSearchPage(page, kw);
+    }).catch(function () {
+      if (seq !== searchSeq) return;
+      searchStatus.textContent = "加载失败，已显示的结果保留，请点击加载更多重试。";
+    }).finally(function () {
+      if (seq !== searchSeq) return;
+      searchLoading = false;
+      updateSearchMore();
+    });
+  });
 
   doubanSearchInput.addEventListener("input", function () {
     var kw = this.value.trim();
-    clearTimeout(searchTimer);
+    resetSearch(kw);
+    var seq = searchSeq;
     if (!kw) {
       resultList.innerHTML = "";
       searchStatus.textContent = "";
@@ -1563,10 +1625,10 @@
     }
     searchStatus.textContent = "搜索中…";
     searchTimer = setTimeout(function () {
-      var seq = ++searchSeq;
-      doubanSearch(kw).then(function (list) {
+      doubanSearch(kw, 0).then(function (page) {
         if (seq !== searchSeq) return; // 已过期
-        renderSearchResults(list, kw);
+        appendSearchPage(page, kw);
+        updateSearchMore();
       }).catch(function () {
         if (seq !== searchSeq) return;
         resultList.innerHTML = "";
@@ -1582,11 +1644,11 @@
     lastSearchKeyword = kw;
     if (!list.length) {
       resultList.innerHTML = "";
-      searchStatus.textContent = "豆瓣上没有找到「" + kw + "」相关的结果";
+      searchStatus.textContent = searchHasMore ? "本页暂无可添加的影片，可以继续加载更多。" : "豆瓣上没有找到「" + kw + "」相关的结果";
       return;
     }
     searchStatus.textContent = "点一下就加入「" + statusName(addStatus) + "」：";
-    resultList.innerHTML = list.slice(0, 8).map(function (r, i) {
+    resultList.innerHTML = list.map(function (r, i) {
       var isTv = r.episode && r.episode !== "0" && r.episode !== "";
       var url = (r.url || "").split("?")[0];
       var listed = listedMovie(r);
