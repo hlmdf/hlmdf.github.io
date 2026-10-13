@@ -247,6 +247,7 @@ def clean_movie(body, movie_id):
             raise ValueError("评分要在 0 到 10 之间")
     kind = body.get("type")
     status = body.get("status")
+    review = clean_review(body)
     return {
         "id": movie_id,
         "title": title,
@@ -261,7 +262,31 @@ def clean_movie(body, movie_id):
         "rating": rating_out,
         "douban": clean_url(body.get("douban")),
         "poster": larger_poster(body.get("poster")),
+        **review,
     }
+
+
+def clean_review(body):
+    personal = body.get("personalRating", "")
+    if personal in ("", None):
+        personal = ""
+    elif type(personal) not in (str, int) or str(personal) not in ("1", "2", "3", "4", "5"):
+        raise ValueError("个人评分请选择 1–5 颗星，或不评分")
+    else:
+        personal = int(personal)
+    tags = body.get("tags", [])
+    if isinstance(tags, str):
+        tags = tags.split()
+    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+        raise ValueError("标签格式不正确")
+    tags = list(dict.fromkeys(tag.strip() for tag in tags if tag.strip()))
+    comment = body.get("comment", "")
+    if not isinstance(comment, str) or len(comment) > 350:
+        raise ValueError("简短评论最多 350 字")
+    private = body.get("doubanPrivate", False)
+    if type(private) is not bool:
+        raise ValueError("豆瓣可见性不正确")
+    return {"personalRating": personal, "tags": tags, "comment": comment, "doubanPrivate": private}
 
 
 def new_id():
@@ -741,7 +766,21 @@ def captcha_challenge(data, opener):
     return {"error": douban_error_text(data), "code": 400}
 
 
-def mark_douban_interest(cookies, sid, status):
+def douban_interest_fields(ck, status, review=None):
+    interest = PAGE_STATUS_TO_DOUBAN.get(status or "")
+    if not interest:
+        raise ValueError("状态不对")
+    review = clean_review(review or {})
+    fields = {"ck": ck, "interest": interest, "rating": "", "fold": "F", "foldcollect": "F", "tags": "", "comment": ""}
+    if status == "watched":
+        fields.update(rating=str(review["personalRating"] or ""), tags=" ".join(review["tags"]), comment=review["comment"])
+    # An unchecked checkbox is omitted, as in the real Douban form. No `private=false` truthy string.
+    if review["doubanPrivate"]:
+        fields["private"] = "on"
+    return fields
+
+
+def mark_douban_interest(cookies, sid, status, review=None):
     """把一部片子标进已登录的豆瓣。不在这里删除。"""
     if not re.fullmatch(r"\d{1,12}", str(sid or "")):
         raise ValueError("没有豆瓣链接，没法同步")
@@ -759,14 +798,7 @@ def mark_douban_interest(cookies, sid, status):
     ck = jar_dict(jar).get("ck") or (cookies or {}).get("ck") or ""
     if not ck:
         raise ValueError("豆瓣登录已失效，请重新登录")
-    fields = {
-        "ck": ck,
-        "interest": interest,
-        "rating": "",
-        "fold": "F",
-        "tags": "",
-        "comment": "",
-    }
+    fields = douban_interest_fields(ck, status, review)
     req = urllib.request.Request(
         "https://movie.douban.com/j/subject/%s/interest" % sid,
         data=urllib.parse.urlencode(fields).encode("utf-8"),
@@ -1204,7 +1236,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not sid:
             return {"ok": False, "error": "没有豆瓣链接，没法同步"}
         try:
-            mark_douban_interest(session["cookies"], sid, movie.get("status") or "watched")
+            mark_douban_interest(session["cookies"], sid, movie.get("status") or "watched", movie)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
@@ -1228,6 +1260,9 @@ class Handler(SimpleHTTPRequestHandler):
             found = False
             for index, item in enumerate(items):
                 if item.get("id") == movie_id:
+                    for key, default in (("personalRating", ""), ("tags", []), ("comment", ""), ("doubanPrivate", False)):
+                        if key not in body:
+                            movie[key] = item.get(key, default)
                     items[index] = movie
                     found = True
                     break

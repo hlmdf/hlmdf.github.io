@@ -542,6 +542,13 @@
     padding: 26px 28px;
   }
   .modal h3 { font-size: 18px; margin-bottom: 18px; }
+  #watchedReviewMask { z-index: 1100; }
+  .review-field { display: block; margin: 16px 0; }
+  .review-field input, .review-field textarea { display: block; width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  .review-stars { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .review-stars button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 28px; }
+  .review-stars button.selected { color: #e5a43b; }
+  .review-hint { color: var(--muted); font-size: 13px; line-height: 1.7; }
 
   /* 搜索添加视图 */
   .status-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
@@ -970,6 +977,30 @@
 </div>
 
 <!-- 影片详情 -->
+<div class="modal-mask" id="watchedReviewMask">
+  <form class="modal" id="watchedReviewForm" role="dialog" aria-modal="true" aria-labelledby="watchedReviewTitle">
+    <h3 id="watchedReviewTitle">添加到看过</h3>
+    <p class="review-hint">以下都可以不填，直接继续添加。</p>
+    <div class="review-field">我的评分
+      <div class="review-stars" role="group" aria-label="五星评分">
+        <button type="button" data-stars="1" aria-label="1星 很差">☆</button>
+        <button type="button" data-stars="2" aria-label="2星 较差">☆</button>
+        <button type="button" data-stars="3" aria-label="3星 还行">☆</button>
+        <button type="button" data-stars="4" aria-label="4星 推荐">☆</button>
+        <button type="button" data-stars="5" aria-label="5星 力荐">☆</button>
+        <button type="button" id="clearReviewRating" style="font-size:13px">清除</button>
+      </div>
+      <span id="reviewRatingLabel" class="review-hint">未评分</span>
+    </div>
+    <label class="review-field">标签（多个标签用空格分隔）<input id="reviewTags" autocomplete="off"></label>
+    <label class="review-field">简短评论（最多350字）<textarea id="reviewComment" rows="4"></textarea></label>
+    <div class="review-hint" id="reviewCommentCount">0 / 350</div>
+    <label class="review-field"><input type="checkbox" id="reviewPrivate" style="display:inline;width:auto;margin:0"> 仅豆瓣自己可见</label>
+    <p class="review-hint">个人片单及这里填写的评分、标签、短评仍会公开。</p>
+    <div class="modal-btns"><button type="button" class="btn-cancel" id="cancelWatchedReview">取消</button><button type="submit" class="btn-save">继续添加到看过</button></div>
+  </form>
+</div>
+
 <div class="modal-mask" id="detailMask">
   <div class="modal detail-modal" role="dialog" aria-labelledby="detailTitle">
     <button type="button" class="detail-close" id="detailClose" aria-label="关闭">✕</button>
@@ -1689,6 +1720,75 @@
 
   function addMovie(data, el) {
     if (!mustAdmin() || saving) return;
+    if (el && data.status === "watched" && !listedCopy(data)) {
+      openWatchedReview(data, el);
+      return;
+    }
+    continueAddMovie(data, el);
+  }
+
+  var pendingWatchedReview = null;
+  var reviewRating = "";
+  var watchedReviewMask = document.getElementById("watchedReviewMask");
+  var reviewComment = document.getElementById("reviewComment");
+
+  function setReviewRating(value) {
+    reviewRating = value;
+    watchedReviewMask.querySelectorAll("[data-stars]").forEach(function (button) {
+      var selected = Number(button.dataset.stars) <= Number(value);
+      button.textContent = selected ? "★" : "☆";
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(Number(button.dataset.stars) === value));
+    });
+    document.getElementById("reviewRatingLabel").textContent = value ? ["", "很差", "较差", "还行", "推荐", "力荐"][value] : "未评分";
+  }
+
+  function openWatchedReview(data, el) {
+    pendingWatchedReview = { data: data, el: el };
+    document.getElementById("watchedReviewForm").reset();
+    setReviewRating("");
+    document.getElementById("watchedReviewTitle").textContent = "看过 · " + data.title;
+    document.getElementById("reviewCommentCount").textContent = "0 / 350";
+    watchedReviewMask.classList.add("show");
+    watchedReviewMask.querySelector("[data-stars]").focus();
+  }
+
+  function closeWatchedReview() {
+    watchedReviewMask.classList.remove("show");
+    if (pendingWatchedReview && pendingWatchedReview.el) pendingWatchedReview.el.focus();
+    pendingWatchedReview = null;
+  }
+
+  function submitWatchedReview(event) {
+    event.preventDefault();
+    if (!pendingWatchedReview || !mustAdmin() || saving) return;
+    if (Array.from(reviewComment.value).length > 350) { toast("短评最多350字"); return; }
+    var pending = pendingWatchedReview;
+    var data = Object.assign({}, pending.data, {
+      personalRating: reviewRating,
+      tags: document.getElementById("reviewTags").value.trim().split(/\s+/).filter(Boolean),
+      comment: reviewComment.value,
+      doubanPrivate: document.getElementById("reviewPrivate").checked
+    });
+    closeWatchedReview();
+    continueAddMovie(data, pending.el);
+  }
+
+  watchedReviewMask.querySelectorAll("[data-stars]").forEach(function (button) {
+    button.addEventListener("click", function () { setReviewRating(Number(button.dataset.stars)); });
+  });
+  document.getElementById("clearReviewRating").addEventListener("click", function () { setReviewRating(""); });
+  document.getElementById("cancelWatchedReview").addEventListener("click", closeWatchedReview);
+  document.getElementById("watchedReviewForm").addEventListener("submit", submitWatchedReview);
+  reviewComment.addEventListener("input", function () {
+    document.getElementById("reviewCommentCount").textContent = Array.from(reviewComment.value).length + " / 350";
+  });
+  watchedReviewMask.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") { event.stopPropagation(); closeWatchedReview(); }
+  });
+
+  function continueAddMovie(data, el) {
+    if (!mustAdmin() || saving) return;
     var sid = doubanSubjectId(data.douban);
     var listed = listedCopy(data);
     if (listed) {
@@ -1755,6 +1855,9 @@
           detailLine("主演", (item.actors || []).join(" / ")) +
           detailLine("地区", (item.regions || []).join(" / ")) +
           detailLine("类型", (item.genres || []).join(" / ")) +
+          detailLine("我的评分", item.personalRating ? "★".repeat(Number(item.personalRating)) : "") +
+          detailLine("我的标签", (item.tags || []).join(" ")) +
+          detailLine("我的短评", item.comment) +
         '</div>' +
         '<div class="detail-actions">' +
           '<a class="detail-douban" href="' + esc(doubanUrl(item)) + '" target="_blank" rel="noopener">在豆瓣打开</a>' +
