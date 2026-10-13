@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件中转站</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background:
+                radial-gradient(ellipse at 20% 80%, rgba(100, 50, 200, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(50, 150, 200, 0.1) 0%, transparent 50%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 520px;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 22px;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            color: #888;
+            font-size: 0.95rem;
+            margin-top: 6px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 30px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border-radius: 12px;
+            cursor: pointer;
+            color: #888;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+
+        .tab.active {
+            color: #fff;
+            background: rgba(102, 126, 234, 0.15);
+            border-color: rgba(102, 126, 234, 0.4);
+        }
+
+        .quota {
+            min-height: 2.6em;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .quota-count {
+            color: #cfcfe6;
+            font-size: 0.92rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .quota-note {
+            color: #777;
+            font-size: 0.78rem;
+            margin-top: 4px;
+        }
+
+        .quota.quota-low .quota-count { color: #e67e22; }
+        .quota.quota-empty .quota-count { color: #e74c3c; }
+
+        .stage-wrap {
+            position: relative;
+            height: 300px;
+        }
+
+        .stage {
+            position: absolute;
+            inset: 0;
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 28px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        #view-send { cursor: pointer; }
+        #view-send.dragover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.08);
+        }
+
+        .stage-icon { font-size: 2.5rem; margin-bottom: 10px; }
+        .stage-hint { color: #888; font-size: 0.9rem; margin-top: 6px; }
+
+        .progress-wrap { width: 100%; }
+
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 4px;
+            transition: width 0.15s;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+
+        .code-display {
+            font-size: 3rem;
+            font-weight: 700;
+            letter-spacing: 8px;
+            background: linear-gradient(135deg, #667eea, #f093fb);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 12px 0;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3); }
+        .btn:disabled { opacity: 0.6; cursor: default; transform: none; box-shadow: none; }
+        .btn.block { width: 100%; padding: 14px; font-size: 1rem; margin-top: 10px; }
+
+        .btn.ghost {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .meta-line {
+            color: #888;
+            font-size: 0.85rem;
+            margin: 4px 0;
+        }
+
+        .pickup-block { width: 100%; }
+
+        .pickup-input {
+            display: flex;
+            gap: 8px;
+        }
+
+        .pickup-input input {
+            flex: 1;
+            min-width: 0;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 14px;
+            color: #fff;
+            font-size: 1.3rem;
+            text-align: center;
+            letter-spacing: 6px;
+            outline: none;
+        }
+
+        .pickup-input input:focus { border-color: #667eea; }
+
+        .file-slot {
+            width: 100%;
+            min-height: 132px;
+            margin-top: 14px;
+        }
+
+        .file-card {
+            display: none;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 16px;
+            text-align: left;
+        }
+
+        .file-name {
+            font-weight: 600;
+            word-break: break-all;
+            margin-bottom: 6px;
+        }
+
+        .status-text {
+            height: 1.25em;
+            line-height: 1.25em;
+            margin-top: 12px;
+            overflow: hidden;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #e74c3c;
+        }
+
+        .status-text.ok { color: #8fd6a8; }
+
+        .expire-warn { color: #e67e22; }
+
+        @media (max-width: 480px) {
+            .code-display { font-size: 2.2rem; letter-spacing: 5px; }
+            .stage-wrap { height: 320px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg"></div>
+
+    <div class="container">
+        <div class="header">
+            <h1>📦 文件中转站</h1>
+            <p>取件码只能用一次 · 取走后源文件销毁</p>
+        </div>
+
+        <div class="card">
+            <div class="quota" id="quota">
+                <div class="quota-count" id="quota-count">已上传 — 次，剩余 — 次</div>
+                <div class="quota-note">同一 IP 每天最多上传 100 次，北京时间零点重置，下载不限</div>
+            </div>
+
+            <div class="tabs">
+                <div class="tab active" id="tab-send" onclick="switchTab('send')">发送文件</div>
+                <div class="tab" id="tab-pickup" onclick="switchTab('pickup')">接收文件</div>
+            </div>
+
+            <div class="stage-wrap">
+                <div class="stage" id="view-send">
+                    <div id="drop-body">
+                        <div class="stage-icon">📤</div>
+                        <div>点击选择文件，或拖拽到这里</div>
+                        <div class="stage-hint">单文件最大 200MB · 未取走的文件 24 小时后销毁</div>
+                    </div>
+                    <input type="file" id="file-input" style="display:none">
+
+                    <div class="progress-wrap" id="progress-wrap" style="display:none">
+                        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+                        <div class="progress-text" id="progress-text">上传中 0%</div>
+                    </div>
+
+                    <div id="send-result" style="display:none">
+                        <div class="meta-line">取件码</div>
+                        <div class="code-display" id="result-code">------</div>
+                        <div class="meta-line" id="result-meta"></div>
+                        <div class="meta-line">把取件码发给对方。对方下载一次后，源文件会销毁。</div>
+                        <button class="btn ghost block" id="again-btn" onclick="resetSend()">再传一个</button>
+                    </div>
+                </div>
+
+                <div class="stage" id="view-pickup" style="display:none">
+                    <div class="pickup-block">
+                        <div class="pickup-input">
+                            <input type="text" id="pickup-code" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="6位取件码">
+                            <button class="btn" id="query-btn" onclick="queryFile()">取件</button>
+                        </div>
+                        <div class="file-slot">
+                            <div class="file-card" id="file-card">
+                                <div class="file-name" id="file-name"></div>
+                                <div class="meta-line" id="file-meta"></div>
+                                <div class="meta-line expire-warn" id="file-expire"></div>
+                                <button class="btn block" id="download-btn">下载文件</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="status-text" id="form-status"></div>
+        </div>
+    </div>
+
+    <script>
+        const sendView = document.getElementById('view-send');
+        const fileInput = document.getElementById('file-input');
+
+        loadQuota();
+        setInterval(loadQuota, 60000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) loadQuota(); });
+
+        function switchTab(tab) {
+            document.getElementById('tab-send').classList.toggle('active', tab === 'send');
+            document.getElementById('tab-pickup').classList.toggle('active', tab === 'pickup');
+            document.getElementById('view-send').style.display = tab === 'send' ? '' : 'none';
+            document.getElementById('view-pickup').style.display = tab === 'pickup' ? '' : 'none';
+            setStatus('');
+        }
+
+        function setStatus(text, ok) {
+            const el = document.getElementById('form-status');
+            el.textContent = text || '';
+            el.classList.toggle('ok', !!ok);
+        }
+
+        function renderQuota(q) {
+            const box = document.getElementById('quota');
+            document.getElementById('quota-count').textContent =
+                `今日已上传 ${q.used} 次，剩余 ${q.remaining} 次`;
+            box.classList.toggle('quota-empty', q.remaining === 0);
+            box.classList.toggle('quota-low', q.remaining > 0 && q.remaining <= 10);
+            const note = box.querySelector('.quota-note');
+            if (note && q.limit) note.textContent = `同一 IP 每天最多上传 ${q.limit} 次，北京时间零点重置，下载不限`;
+        }
+
+        function loadQuota() {
+            return fetch('/api/quota')
+                .then(r => r.json())
+                .then(renderQuota)
+                .catch(() => {});
+        }
+
+        sendView.addEventListener('click', (e) => {
+            if (e.target.closest('button')) return;
+            if (document.getElementById('send-result').style.display !== 'none') return;
+            if (document.getElementById('progress-wrap').style.display !== 'none') return;
+            fileInput.click();
+        });
+        sendView.addEventListener('dragover', e => {
+            e.preventDefault();
+            sendView.classList.add('dragover');
+        });
+        sendView.addEventListener('dragleave', () => sendView.classList.remove('dragover'));
+        sendView.addEventListener('drop', e => {
+            e.preventDefault();
+            sendView.classList.remove('dragover');
+            if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length) uploadFile(fileInput.files[0]);
+        });
+
+        function showSendState(state) {
+            document.getElementById('drop-body').style.display = state === 'drop' ? '' : 'none';
+            document.getElementById('progress-wrap').style.display = state === 'progress' ? '' : 'none';
+            document.getElementById('send-result').style.display = state === 'result' ? '' : 'none';
+            sendView.style.cursor = state === 'drop' ? 'pointer' : 'default';
+        }
+
+        function uploadFile(file) {
+            setStatus('');
+            showSendState('progress');
+            document.getElementById('progress-fill').style.width = '0%';
+            document.getElementById('progress-text').textContent = '上传中 0%';
+
+            const fd = new FormData();
+            fd.append('file', file);
+
+            const xhr = new XMLHttpRequest();
+            xhr.upload.onprogress = e => {
+                if (!e.lengthComputable) return;
+                const pct = Math.round(e.loaded / e.total * 100);
+                document.getElementById('progress-fill').style.width = pct + '%';
+                document.getElementById('progress-text').textContent =
+                    `上传中 ${pct}%（${formatSize(e.loaded)} / ${formatSize(e.total)}）`;
+            };
+            xhr.onload = () => {
+                let data = {};
+                try { data = JSON.parse(xhr.responseText); } catch {}
+                if (data.quota) renderQuota(data.quota);
+                if (xhr.status === 200) {
+                    showResult(data);
+                    return;
+                }
+                showSendState('drop');
+                setStatus(data.error || '上传失败');
+                loadQuota();
+            };
+            xhr.onerror = () => {
+                showSendState('drop');
+                setStatus('网络错误，上传失败');
+            };
+            xhr.open('POST', '/api/upload');
+            xhr.send(fd);
+        }
+
+        function showResult(meta) {
+            document.getElementById('result-code').textContent = meta.code;
+            document.getElementById('result-meta').textContent =
+                `${meta.name} · ${formatSize(meta.size)}`;
+            showSendState('result');
+        }
+
+        function resetSend() {
+            showSendState('drop');
+            fileInput.value = '';
+            setStatus('');
+        }
+
+        function queryFile() {
+            const code = document.getElementById('pickup-code').value.trim();
+            setStatus('');
+            document.getElementById('file-card').style.display = 'none';
+
+            if (!/^\d{6}$/.test(code)) {
+                setStatus('请输入 6 位数字取件码');
+                return;
+            }
+
+            fetch('/api/info/' + code)
+                .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok) {
+                        setStatus(data.error || '查询失败');
+                        return;
+                    }
+                    document.getElementById('file-name').textContent = '📄 ' + data.name;
+                    document.getElementById('file-meta').textContent = formatSize(data.size);
+                    document.getElementById('file-expire').textContent =
+                        formatExpire(data.expiresAt) + '后自动销毁 · 下载一次后源文件销毁';
+                    const btn = document.getElementById('download-btn');
+                    btn.disabled = false;
+                    btn.textContent = '下载文件';
+                    btn.onclick = () => downloadFile(code, data.name);
+                    document.getElementById('file-card').style.display = 'block';
+                })
+                .catch(() => setStatus('网络错误'));
+        }
+
+        async function downloadFile(code, name) {
+            const btn = document.getElementById('download-btn');
+            btn.disabled = true;
+            btn.textContent = '下载中…';
+            setStatus('');
+            try {
+                const r = await fetch('/api/download/' + code);
+                if (!r.ok) {
+                    let msg = '下载失败';
+                    try { msg = (await r.json()).error || msg; } catch {}
+                    document.getElementById('file-card').style.display = 'none';
+                    setStatus(msg);
+                    loadQuota();
+                    return;
+                }
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                document.getElementById('file-card').style.display = 'none';
+                document.getElementById('pickup-code').value = '';
+                setStatus('已取走，源文件已删除', true);
+                loadQuota();
+            } catch {
+                btn.disabled = false;
+                btn.textContent = '下载文件';
+                setStatus('网络错误，下载失败');
+            }
+        }
+
+        document.getElementById('pickup-code').addEventListener('keydown', e => {
+            if (e.key === 'Enter') queryFile();
+        });
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+            return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+
+        function formatExpire(expiresAt) {
+            const ms = Math.max(0, expiresAt - Date.now());
+            const h = Math.floor(ms / 3600000);
+            const m = Math.floor((ms % 3600000) / 60000);
+            return h > 0 ? `${h} 小时 ${m} 分钟` : `${m} 分钟`;
+        }
+    </script>
+</body>
+</html>

@@ -41,6 +41,14 @@ yarn-error.log*
 /tools/movie-tracker/douban_session.json
 /tools/movie-tracker/douban_pending.json
 /tools/movie-tracker/__pycache__/
+/tools/movie-tracker/config.json.tmp
+
+# FileDrop runtime data is kept on the server.
+/tools/filedrop/node_modules/
+/tools/filedrop/uploads/
+/tools/filedrop/usage.json*
+/tools/deploy-personal-tools/*.zip
+/tools/deploy-personal-tools/*.log
 
 # vercel
 .vercel

@@ -41,11 +41,13 @@ DATA_PATH = os.path.join(BASE, "movies.json")
 DOUBAN_SESSION_PATH = os.path.join(BASE, "douban_session.json")
 DOUBAN_PENDING_PATH = os.path.join(BASE, "douban_pending.json")
 LOCK = threading.Lock()
+AUTH_LOCK = threading.RLock()
 DOUBAN_LOCK = threading.Lock()
 FAILS = {}
 TOKEN_TTL = 30 * 24 * 3600
 BLOCKED = {
     "config.json",
+    "config.json.tmp",
     "movies.json",
     "movies.json.bak",
     "movies.json.tmp",
@@ -80,11 +82,11 @@ def load_config():
             raise SystemExit("config.json 不完整。忘记密码的话，删掉它再重新设置。")
         return cfg
 
-    password = os.environ.get("MOVIE_PASSWORD", "").strip()
-    if len(password) < 6:
+    password = os.environ.get("MOVIE_PASSWORD", "")
+    if not password:
         raise SystemExit(
             "还没有管理密码。第一次请这样启动：\n"
-            "  MOVIE_PASSWORD='至少6位的密码' python3 server.py 8000\n"
+            "  MOVIE_PASSWORD='你的管理密码' python3 server.py 8000\n"
             "密码只会写成 config.json，之后不用再带这个环境变量。"
         )
     cfg = {
@@ -100,6 +102,30 @@ def load_config():
         pass
     print("已写入 config.json。之后直接 python3 server.py 8000 即可。")
     return cfg
+
+
+def change_management_password(config, current, new, confirmation):
+    """Change only the local movie administrator password and invalidate its tokens."""
+    if not isinstance(current, str) or not isinstance(new, str) or not new:
+        raise ValueError("请填写当前管理密码和新密码")
+    if new != confirmation:
+        raise ValueError("两次输入的新密码不一致")
+    if not check_password(current, config["password_hash"]):
+        raise ValueError("当前管理密码不正确")
+    revised = dict(config)
+    revised.update(password_hash=hash_password(new), token_secret=secrets.token_hex(32))
+    temporary = CONFIG_PATH + ".tmp"
+    try:
+        fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(revised, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, CONFIG_PATH)
+        config.update(revised)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def make_token(secret):
@@ -996,6 +1022,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.clean_path()
         if path == "/api/login":
             return self.handle_login()
+        if path == "/api/password":
+            return self.handle_change_password()
         if path == "/api/douban/login":
             return self.handle_douban_login()
         if path == "/api/douban/phone-code":
@@ -1066,7 +1094,8 @@ class Handler(SimpleHTTPRequestHandler):
         header = self.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             return False
-        return verify_token(self.config["token_secret"], header[7:].strip())
+        with AUTH_LOCK:
+            return verify_token(self.config["token_secret"], header[7:].strip())
 
     def require_auth(self):
         if self.authorized():
@@ -1108,13 +1137,38 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"error": str(exc)}, 400)
         password = body.get("password") if isinstance(body, dict) else ""
         password = password if isinstance(password, str) else ""
-        if not check_password(password, self.config["password_hash"]):
-            note_login_failure(ip)
-            time.sleep(0.4)
-            return self.send_json({"error": "密码不对"}, 401)
-        FAILS.pop(ip, None)
-        token, exp = make_token(self.config["token_secret"])
+        with AUTH_LOCK:
+            if not check_password(password, self.config["password_hash"]):
+                note_login_failure(ip)
+                time.sleep(0.4)
+                return self.send_json({"error": "密码不对"}, 401)
+            FAILS.pop(ip, None)
+            token, exp = make_token(self.config["token_secret"])
         self.send_json({"token": token, "expires": exp})
+
+    def handle_change_password(self):
+        if not self.require_auth():
+            return
+        ip = client_ip_of(self)
+        if login_locked(ip):
+            return self.send_json({"error": "试得太多了，请 10 分钟后再试"}, 429)
+        try:
+            body = self.read_json(10_000)
+            if not isinstance(body, dict):
+                raise ValueError("请求不对")
+            with AUTH_LOCK:
+                if not self.require_auth():
+                    return
+                change_management_password(self.config, body.get("current_password"),
+                                           body.get("new_password"), body.get("confirm_password"))
+                FAILS.pop(ip, None)
+        except ValueError as exc:
+            if str(exc) == "当前管理密码不正确":
+                note_login_failure(ip)
+            return self.send_json({"error": str(exc)}, 400)
+        except OSError:
+            return self.send_json({"error": "密码保存失败，原密码仍有效，请检查服务器文件权限"}, 500)
+        self.send_json({"ok": True})
 
     def handle_create(self):
         if not self.require_auth():
