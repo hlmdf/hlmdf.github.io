@@ -771,6 +771,7 @@
   <select id="decadeFilter"><option value="all">全部</option></select>
   <span class="filter-label">排序</span>
   <select id="sortFilter">
+    <option value="added">添加时间</option>
     <option value="year">上映年份</option>
     <option value="rating">豆瓣评分</option>
   </select>
@@ -1133,7 +1134,7 @@
   var curRegion = "all";
   var curGenre = "all";
   var curDecade = "all";
-  var curSort = "year";
+  var curSort = "added";
   var curPage = 1;
   var PAGE_SIZE = 15;   // 每页 5 列 × 3 行
   var keyword = "";
@@ -1188,6 +1189,10 @@
 
   function match(item) {
     if (curStatus !== "all" && item.status !== curStatus) return false;
+    return matchFilters(item);
+  }
+
+  function matchFilters(item) {
     if (curType !== "all" && item.type !== curType) return false;
     if (curRegion !== "all" && (!item.regions || item.regions.indexOf(curRegion) === -1)) return false;
     if (curGenre !== "all" && (!item.genres || item.genres.indexOf(curGenre) === -1)) return false;
@@ -1352,16 +1357,7 @@
     }
     buildFilterOptions();
     var list = items.filter(match);
-    list.sort(function (a, b) {
-      if (curSort === "rating") {
-        var ar = parseFloat(a.rating);
-        var br = parseFloat(b.rating);
-        if (isNaN(ar)) ar = -1;
-        if (isNaN(br)) br = -1;
-        if (br !== ar) return br - ar;
-      }
-      return (b.year || 0) - (a.year || 0);
-    });
+    sortMovies(list);
 
     if (!list.length) {
       var emptyText = items.length
@@ -1381,9 +1377,26 @@
     renderCounts();
   }
 
+  function sortMovies(list) {
+    // The API appends new entries and preserves their positions on edits/imports.
+    if (curSort === "added") return list.reverse();
+    return list.sort(function (a, b) {
+      if (curSort === "rating") {
+        var ar = parseFloat(a.rating);
+        var br = parseFloat(b.rating);
+        if (isNaN(ar)) ar = -1;
+        if (isNaN(br)) br = -1;
+        if (br !== ar) return br - ar;
+      }
+      return (b.year || 0) - (a.year || 0);
+    });
+
+  }
+
   function renderCounts() {
-    var counts = { all: items.length, watched: 0, doing: 0, want: 0 };
-    items.forEach(function (m) { counts[m.status] = (counts[m.status] || 0) + 1; });
+    var filtered = items.filter(matchFilters);
+    var counts = { all: filtered.length, watched: 0, doing: 0, want: 0 };
+    filtered.forEach(function (m) { counts[m.status] = (counts[m.status] || 0) + 1; });
     document.querySelectorAll("#statusTabs button").forEach(function (btn) {
       var s = btn.getAttribute("data-status");
       var names = { all: "全部", watched: "看过", doing: "在看", want: "想看" };
@@ -2102,10 +2115,10 @@
   document.getElementById("resetBtn").addEventListener("click", function () {
     askConfirm("确定重置筛选吗？不会删除片子。", function () {
       curStatus = "all"; curType = "all"; curRegion = "all"; curGenre = "all"; curDecade = "all";
-      curSort = "year";
+      curSort = "added";
       curPage = 1; keyword = "";
       document.getElementById("searchInput").value = "";
-      document.getElementById("sortFilter").value = "year";
+      document.getElementById("sortFilter").value = "added";
       [["statusTabs", "data-status"], ["typeTabs", "data-type"]].forEach(function (p) {
         document.querySelectorAll("#" + p[0] + " button").forEach(function (b) {
           b.classList.toggle("active", b.getAttribute(p[1]) === "all");
