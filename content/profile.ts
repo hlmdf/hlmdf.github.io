@@ -372,6 +372,10 @@ export const profile = {
   ] satisfies ToolGroup[],
   personalTools: [
     {
+      name: { zh: "提醒小助手", en: "Reminders" },
+      href: "https://47.103.222.155:5003/",
+    },
+    {
       name: { zh: "B站音频提取", en: "Bilibili audio" },
       href: "https://47.103.222.155:5000",
     },

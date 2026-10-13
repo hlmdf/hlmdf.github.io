@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>提醒小助手</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f0f2f5;
+    color: #333;
+    min-height: 100vh;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 16px 60px; }
+  header { text-align: center; padding: 20px 0 24px; }
+  header h1 { font-size: 28px; color: #2c3e50; }
+  header p { color: #888; margin-top: 6px; font-size: 14px; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .tab-btn {
+    padding: 10px 22px; border: none; border-radius: 8px; cursor: pointer;
+    font-size: 15px; background: #e4e7eb; color: #555; transition: all .2s;
+  }
+  .tab-btn.active { background: #4a90d9; color: #fff; }
+  .tab-page { display: none; }
+  .tab-page.active { display: block; }
+
+  .card {
+    background: #fff; border-radius: 12px; padding: 22px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-bottom: 18px;
+  }
+  .card h2 { font-size: 17px; color: #2c3e50; margin-bottom: 16px;
+    padding-bottom: 10px; border-bottom: 1px solid #eee; }
+
+  label.field-label { display: block; font-size: 14px; color: #666;
+    margin: 14px 0 6px; }
+  input[type=text], input[type=time], input[type=date], input[type=password],
+  input[type=number], textarea, select {
+    width: 100%; padding: 10px 12px; border: 1px solid #d9dce1;
+    border-radius: 8px; font-size: 14px; font-family: inherit;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none; border-color: #4a90d9;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+
+  .checkbox-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .checkbox-item {
+    display: flex; align-items: center; gap: 6px; padding: 8px 14px;
+    border: 1px solid #d9dce1; border-radius: 8px; cursor: pointer;
+    font-size: 14px; user-select: none; transition: all .15s;
+  }
+  .checkbox-item.checked { background: #eaf3fd; border-color: #4a90d9; color: #4a90d9; }
+  .checkbox-item input { display: none; }
+
+  .btn {
+    padding: 10px 24px; border: none; border-radius: 8px; cursor: pointer;
+    font-size: 14px; transition: all .2s;
+  }
+  .btn-primary { background: #4a90d9; color: #fff; }
+  .btn-primary:hover { background: #3a7bc0; }
+  .btn-ghost { background: #f0f2f5; color: #555; }
+  .btn-ghost:hover { background: #e2e5e9; }
+  .btn-danger { background: #fff; color: #e74c3c; border: 1px solid #f5c6c0; }
+  .btn-danger:hover { background: #fdf0ef; }
+  .btn-sm { padding: 6px 14px; font-size: 13px; }
+
+  /* 提醒卡片列表 */
+  .reminder-item {
+    background: #fff; border-radius: 12px; padding: 18px 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-bottom: 12px;
+    display: flex; align-items: flex-start; gap: 14px;
+  }
+  .reminder-item.disabled { opacity: .5; }
+  .reminder-main { flex: 1; min-width: 0; }
+  .reminder-content { font-size: 16px; color: #2c3e50; word-break: break-all; }
+  .reminder-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px;
+    font-size: 13px; align-items: center; }
+  .tag {
+    padding: 3px 10px; border-radius: 20px; font-size: 12px;
+  }
+  .tag-time { background: #eaf3fd; color: #4a90d9; font-weight: bold; }
+  .tag-rule { background: #f0eafd; color: #7a5fd0; }
+  .tag-ch { background: #e8f8ee; color: #27ae60; }
+  .reminder-actions { display: flex; flex-direction: column; gap: 8px; }
+
+  /* 开关 */
+  .switch { position: relative; width: 42px; height: 24px; display: inline-block; }
+  .switch input { display: none; }
+  .slider {
+    position: absolute; inset: 0; background: #ccc; border-radius: 24px;
+    cursor: pointer; transition: .2s;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 18px; height: 18px; left: 3px;
+    top: 3px; background: #fff; border-radius: 50%; transition: .2s;
+  }
+  .switch input:checked + .slider { background: #4a90d9; }
+  .switch input:checked + .slider::before { transform: translateX(18px); }
+
+  .channel-block { border: 1px solid #eee; border-radius: 10px;
+    padding: 16px; margin-bottom: 14px; }
+  .channel-block h3 { font-size: 15px; margin-bottom: 4px; }
+  .channel-block .hint { font-size: 12px; color: #999; margin-bottom: 10px;
+    line-height: 1.6; }
+  .channel-block .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .channel-block .row > * { flex: 1; min-width: 160px; }
+  .channel-actions { margin-top: 12px; display: flex; gap: 10px; }
+
+  .toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    padding: 12px 28px; border-radius: 8px; color: #fff; font-size: 14px;
+    z-index: 999; display: none; box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  }
+  .toast.success { background: #27ae60; }
+  .toast.error { background: #e74c3c; }
+
+  .empty { text-align: center; color: #aaa; padding: 40px 0; font-size: 14px; }
+
+  /* 确认弹窗 */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none;
+    align-items: center; justify-content: center; z-index: 998;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    background: #fff; border-radius: 12px; padding: 26px 30px;
+    width: 340px; text-align: center;
+  }
+  .modal p { margin-bottom: 22px; font-size: 15px; }
+  .modal .btns { display: flex; gap: 12px; justify-content: center; }
+</style>
+</head>
+<body>
+<section id="login-panel" class="container" style="max-width:420px" hidden>
+  <form id="login-form" class="card">
+    <h1 style="font-size:24px;margin-bottom:12px">⏰ 提醒小助手</h1>
+    <p style="color:#666">私人提醒，请输入密码登录。</p>
+    <p style="color:#888;font-size:13px;margin-top:8px">登录后保持 30 天，访问时自动续期。</p>
+    <label class="field-label" for="login-password">登录密码</label>
+    <input id="login-password" type="password" autocomplete="current-password" required>
+    <button class="btn btn-primary" style="margin-top:18px" type="submit">登录</button>
+    <p id="login-error" role="alert" style="color:#c0392b;margin-top:12px"></p>
+  </form>
+</section>
+<div class="container" id="app-panel" hidden>
+  <header>
+    <h1>⏰ 提醒小助手</h1>
+    <p>定制你的提醒：内容 · 时间 · 重复规则 · 通知方式</p>
+    <p>所有提醒均使用北京时间（Asia/Shanghai）</p>
+    <button id="btn-logout" class="btn btn-ghost btn-sm" style="margin-top:10px">退出登录</button>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="reminders">我的提醒</button>
+    <button class="tab-btn" data-tab="settings">通知渠道设置</button>
+    <button class="tab-btn" data-tab="account">账号设置</button>
+  </div>
+
+  <!-- ============ 提醒页 ============ -->
+  <div class="tab-page active" id="page-reminders">
+    <div class="card">
+      <h2 id="form-title">新建提醒</h2>
+      <label class="field-label">提醒我做什么</label>
+      <textarea id="f-content" placeholder="例如：站起来活动 5 分钟，喝杯水"></textarea>
+
+      <label class="field-label">提醒时间</label>
+      <input type="time" id="f-time" value="09:00">
+
+      <label class="field-label">重复规则</label>
+      <select id="f-rule-type">
+        <option value="once">仅一次（指定日期）</option>
+        <option value="daily" selected>每天</option>
+        <option value="weekdays">每周工作日（周一~周五）</option>
+        <option value="weekly">每周指定几天</option>
+      </select>
+      <div id="f-once-date" style="margin-top:10px; display:none;">
+        <input type="date" id="f-date">
+      </div>
+      <div id="f-weekly-days" style="margin-top:10px; display:none;">
+        <div class="checkbox-row" id="days-row"></div>
+      </div>
+
+      <label class="field-label">通知方式（先到「通知渠道设置」填好配置）</label>
+      <div class="checkbox-row" id="channels-row"></div>
+
+      <div style="margin-top:20px; display:flex; gap:12px;">
+        <button class="btn btn-primary" id="btn-save">保存提醒</button>
+        <button class="btn btn-ghost" id="btn-cancel-edit" style="display:none;">取消编辑</button>
+      </div>
+    </div>
+
+    <div id="reminder-list"></div>
+  </div>
+
+  <!-- ============ 渠道设置页 ============ -->
+  <div class="tab-page" id="page-account">
+    <form id="password-form" class="card">
+      <h2>修改登录密码</h2>
+      <p style="font-size:14px;color:#666;line-height:1.7">密码长度和字符不限，不能为空。修改成功后所有设备退出，请用新密码重新登录。</p>
+      <label class="field-label" for="p-current">当前密码</label>
+      <input id="p-current" type="password" autocomplete="current-password" required>
+      <label class="field-label" for="p-new">新密码</label>
+      <input id="p-new" type="password" autocomplete="new-password" required>
+      <label class="field-label" for="p-confirm">再次输入新密码</label>
+      <input id="p-confirm" type="password" autocomplete="new-password" required>
+      <button id="btn-change-password" class="btn btn-primary" type="submit" style="margin-top:18px">修改密码</button>
+    </form>
+  </div>
+
+  <!-- ============ 渠道设置页 ============ -->
+  <div class="tab-page" id="page-settings">
+    <div class="card">
+      <h2>通知渠道设置</h2>
+
+      <div class="channel-block">
+        <h3>🔷 企业微信机器人</h3>
+        <div class="hint">在企业微信群的群设置中添加机器人，复制 Webhook 地址粘贴到这里。提醒会发送到这个群；已保存地址时留空保持不变。</div>
+        <div class="row"><input type="password" id="s-wecom-webhook" autocomplete="off" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></div>
+        <div class="channel-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings('wecom')">保存</button>
+          <button class="btn btn-ghost btn-sm" onclick="testChannel('wecom')">发送测试</button>
+        </div>
+      </div>
+
+      <div class="channel-block">
+        <h3>📧 邮件</h3>
+        <div class="hint">以 QQ 邮箱为例：设置 → 账户 → 开启 SMTP 服务 → 获得「授权码」（不是登录密码）。其他邮箱改 SMTP 地址即可（如 163：smtp.163.com）。</div>
+        <div class="row">
+          <input type="text" id="s-email-host" placeholder="SMTP 地址，如 smtp.qq.com">
+          <input type="number" id="s-email-port" placeholder="端口，如 465">
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <input type="text" id="s-email-account" placeholder="发信邮箱账号">
+          <input type="password" id="s-email-code" placeholder="授权码">
+          <input type="text" id="s-email-to" placeholder="收信邮箱（可填自己）">
+        </div>
+        <div class="channel-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings('email')">保存</button>
+          <button class="btn btn-ghost btn-sm" onclick="testChannel('email')">发送测试</button>
+        </div>
+      </div>
+
+      <!-- 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消本段注释
+      <div class="channel-block">
+        <h3>🟢 Server酱</h3>
+        <div class="hint">登录 sct.ftqq.com ，微信扫码绑定后复制 SendKey。消息通过公众号推到微信（免费版每天有条数限制）。</div>
+        <div class="row"><input type="text" id="s-serverchan-key" placeholder="SendKey，形如 SCTxxxxxx"></div>
+        <div class="channel-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings('serverchan')">保存</button>
+          <button class="btn btn-ghost btn-sm" onclick="testChannel('serverchan')">发送测试</button>
+        </div>
+      </div>
+
+      <div class="channel-block">
+        <h3>🟣 PushPlus</h3>
+        <div class="hint">登录 www.pushplus.plus ，微信扫码后复制 token。也是通过公众号推到微信。</div>
+        <div class="row"><input type="text" id="s-pushplus-token" placeholder="token"></div>
+        <div class="channel-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings('pushplus')">保存</button>
+          <button class="btn btn-ghost btn-sm" onclick="testChannel('pushplus')">发送测试</button>
+        </div>
+      </div>
+      -->
+
+      <div class="channel-block">
+        <h3>🌐 浏览器弹窗</h3>
+        <div class="hint">无需配置，但要求本页面处于打开状态（可最小化）。点击授权后，到点会弹系统通知。</div>
+        <div class="channel-actions">
+          <button class="btn btn-primary btn-sm" id="btn-notify-perm">授权浏览器通知</button>
+          <button class="btn btn-ghost btn-sm" onclick="testChannel('browser')">发送测试</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 删除确认弹窗 -->
+<div class="modal-mask" id="delete-modal">
+  <div class="modal">
+    <p>确定删除这条提醒吗？</p>
+    <div class="btns">
+      <button class="btn btn-danger" id="btn-confirm-delete">删除</button>
+      <button class="btn btn-ghost" onclick="closeDeleteModal()">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const DAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const CHANNELS = [
+    { key: "wecom",      name: "企业微信" },
+    { key: "email",      name: "邮件" },
+    // 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消下面两行注释
+    // { key: "serverchan", name: "Server酱" },
+    // { key: "pushplus",   name: "PushPlus" },
+    { key: "browser",    name: "浏览器弹窗" }
+  ];
+
+  let reminders = [];
+  let editingId = null;
+  let deletingId = null;
+  let csrfToken = "";
+  let authenticated = false;
+  let pollTimer;
+  let polling = false;
+
+  function showLogin() {
+    authenticated = false;
+    clearTimeout(pollTimer);
+    $("app-panel").hidden = true;
+    $("login-panel").hidden = false;
+  }
+
+  // ---------- 工具 ----------
+  function toast(msg, ok = true) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "toast " + (ok ? "success" : "error");
+    t.style.display = "block";
+    setTimeout(() => t.style.display = "none", 2500);
+  }
+
+  async function api(path, method = "GET", body) {
+    const opt = { method, credentials: "same-origin", headers: { "X-CSRF-Token": csrfToken } };
+    if (body !== undefined) {
+      opt.headers["Content-Type"] = "application/json";
+      opt.body = JSON.stringify(body);
+    }
+    // Relative API paths support both a dedicated host and /reminder/ behind Nginx.
+    const resp = await fetch(path.replace(/^\//, ""), opt);
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (resp.status === 401 && path !== "/api/login") showLogin();
+      throw new Error(data.error || "请求失败，请稍后重试");
+    }
+    return data;
+  }
+
+  window.addEventListener("unhandledrejection", event => {
+    toast(event.reason?.message || "请求失败，请检查网络", false);
+    event.preventDefault();
+  });
+
+  $("login-form").onsubmit = async event => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector("button");
+    button.disabled = true;
+    $("login-error").textContent = "";
+    try {
+      const info = await api("/api/session");
+      csrfToken = info.csrf;
+      const result = await api("/api/login", "POST", { password: $("login-password").value });
+      csrfToken = result.csrf;
+      $("login-password").value = "";
+      await showApp();
+    } catch (error) {
+      $("login-error").textContent = error.message;
+    } finally { button.disabled = false; }
+  };
+
+  function leaveApp() {
+    reminders = [];
+    resetForm();
+    $("reminder-list").textContent = "";
+    $("s-email-code").value = "";
+    $("s-wecom-webhook").value = "";
+    $("password-form").reset();
+    $("login-password").value = "";
+    csrfToken = "";
+    showLogin();
+  }
+
+  $("btn-logout").onclick = async () => {
+    await api("/api/logout", "POST", {});
+    leaveApp();
+  };
+
+  $("password-form").onsubmit = async event => {
+    event.preventDefault();
+    const button = $("btn-change-password");
+    const current = $("p-current").value;
+    const next = $("p-new").value;
+    const confirmation = $("p-confirm").value;
+    if (!current || !next) { toast("请填写当前密码和新密码", false); return; }
+    if (next !== confirmation) { toast("两次输入的新密码不一致", false); return; }
+    button.disabled = true;
+    try {
+      await api("/api/password", "POST", {
+        current_password: current, new_password: next, confirm_password: confirmation
+      });
+      leaveApp();
+      $("login-error").textContent = "密码已修改，请用新密码重新登录";
+      toast("密码已修改，请重新登录");
+    } catch (error) { toast(error.message, false); }
+    finally { button.disabled = false; }
+  };
+
+  async function showApp() {
+    authenticated = true;
+    $("app-panel").hidden = false;
+    $("login-panel").hidden = true;
+    lastPollTs = 0;
+    pollEpoch = "";
+    await loadReminders();
+    await pollBrowser(false);
+  }
+
+  // ---------- 选项卡 ----------
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-page").forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      $("page-" + btn.dataset.tab).classList.add("active");
+      if (btn.dataset.tab === "settings") loadSettings();
+    };
+  });
+
+  // ---------- 表单：星期 / 渠道复选 ----------
+  function buildCheckboxes() {
+    $("days-row").innerHTML = DAY_NAMES.map((n, i) =>
+      `<label class="checkbox-item" data-day="${i}">
+         <input type="checkbox" value="${i}">${n}</label>`).join("");
+    $("channels-row").innerHTML = CHANNELS.map(c =>
+      `<label class="checkbox-item" data-ch="${c.key}">
+         <input type="checkbox" value="${c.key}">${c.name}</label>`).join("");
+    document.querySelectorAll(".checkbox-item").forEach(item => {
+      item.onclick = e => {
+        e.preventDefault();
+        const box = item.querySelector("input");
+        box.checked = !box.checked;
+        item.classList.toggle("checked", box.checked);
+      };
+    });
+  }
+
+  $("f-rule-type").onchange = () => {
+    const t = $("f-rule-type").value;
+    $("f-once-date").style.display = t === "once" ? "block" : "none";
+    $("f-weekly-days").style.display = t === "weekly" ? "block" : "none";
+  };
+
+  function getFormRule() {
+    const t = $("f-rule-type").value;
+    if (t === "once") return { type: "once", date: $("f-date").value };
+    if (t === "weekly") {
+      const days = [...document.querySelectorAll("#days-row input:checked")]
+        .map(i => +i.value);
+      return { type: "weekly", days };
+    }
+    return { type: t };
+  }
+
+  function getFormChannels() {
+    return [...document.querySelectorAll("#channels-row input:checked")]
+      .map(i => i.value);
+  }
+
+  function resetForm() {
+    editingId = null;
+    $("form-title").textContent = "新建提醒";
+    $("btn-save").textContent = "保存提醒";
+    $("btn-cancel-edit").style.display = "none";
+    $("f-content").value = "";
+    $("f-time").value = "09:00";
+    $("f-rule-type").value = "daily";
+    $("f-rule-type").onchange();
+    document.querySelectorAll("#days-row input").forEach(i => {
+      i.checked = false; i.parentElement.classList.remove("checked");
+    });
+    document.querySelectorAll("#channels-row input").forEach(i => {
+      i.checked = false; i.parentElement.classList.remove("checked");
+    });
+  }
+
+  $("btn-cancel-edit").onclick = resetForm;
+
+  $("btn-save").onclick = async () => {
+    const content = $("f-content").value.trim();
+    const time = $("f-time").value;
+    const rule = getFormRule();
+    const channels = getFormChannels();
+    if (!content) { toast("请填写提醒内容", false); return; }
+    if (!time) { toast("请选择提醒时间", false); return; }
+    if (rule.type === "once" && !rule.date) { toast("请选择日期", false); return; }
+    if (rule.type === "weekly" && rule.days.length === 0) {
+      toast("请至少勾选一个星期几", false); return;
+    }
+    if (channels.length === 0) { toast("请至少选择一种通知方式", false); return; }
+
+    if (editingId) {
+      await api("/api/reminders/" + editingId, "PUT",
+        { content, time, rule, channels, _reset_fired: true });
+      toast("已保存修改");
+    } else {
+      await api("/api/reminders", "POST", { content, time, rule, channels });
+      toast("提醒已创建");
+    }
+    resetForm();
+    loadReminders();
+  };
+
+  // ---------- 提醒列表 ----------
+  function ruleLabel(rule) {
+    if (rule.type === "once") return "仅一次 · " + rule.date;
+    if (rule.type === "daily") return "每天";
+    if (rule.type === "weekdays") return "工作日";
+    if (rule.type === "weekly") {
+      const names = (rule.days || []).map(d => DAY_NAMES[d]).join("、");
+      return "每周 " + (names || "（未选）");
+    }
+    return rule.type;
+  }
+
+  function channelName(key) {
+    const c = CHANNELS.find(c => c.key === key);
+    return c ? c.name : key;
+  }
+
+  async function loadReminders() {
+    reminders = await api("/api/reminders");
+    renderReminders();
+  }
+
+  function renderReminders() {
+    const list = $("reminder-list");
+    if (reminders.length === 0) {
+      list.innerHTML = `<div class="card empty">还没有提醒，在上面创建第一条吧 👆</div>`;
+      return;
+    }
+    list.innerHTML = reminders.map(r => `
+      <div class="reminder-item ${r.enabled ? "" : "disabled"}">
+        <label class="switch" title="启用/停用">
+          <input type="checkbox" ${r.enabled ? "checked" : ""}
+                 onchange="toggleEnabled('${r.id}', this.checked)">
+          <span class="slider"></span>
+        </label>
+        <div class="reminder-main">
+          <div class="reminder-content">${escapeHtml(r.content)}</div>
+          <div class="reminder-meta">
+            <span class="tag tag-time">🕐 ${escapeHtml(r.time)}</span>
+            <span class="tag tag-rule">${escapeHtml(ruleLabel(r.rule))}</span>
+            ${r.channels.map(c => `<span class="tag tag-ch">${escapeHtml(channelName(c))}</span>`).join("")}
+          </div>
+        </div>
+        <div class="reminder-actions">
+          <button class="btn btn-ghost btn-sm" onclick="startEdit('${r.id}')">编辑</button>
+          <button class="btn btn-ghost btn-sm" onclick="fireNow('${r.id}')">立即发送</button>
+          <button class="btn btn-danger btn-sm" onclick="askDelete('${r.id}')">删除</button>
+        </div>
+      </div>`).join("");
+  }
+
+  function escapeHtml(s) {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  window.toggleEnabled = async (id, enabled) => {
+    await api("/api/reminders/" + id, "PUT", { enabled });
+    loadReminders();
+  };
+
+  window.startEdit = id => {
+    const r = reminders.find(x => x.id === id);
+    if (!r) return;
+    resetForm();
+    editingId = id;
+    $("form-title").textContent = "编辑提醒";
+    $("btn-save").textContent = "保存修改";
+    $("btn-cancel-edit").style.display = "inline-block";
+    $("f-content").value = r.content;
+    $("f-time").value = r.time;
+    $("f-rule-type").value = r.rule.type;
+    $("f-rule-type").onchange();
+    if (r.rule.type === "once") $("f-date").value = r.rule.date || "";
+    if (r.rule.type === "weekly") {
+      document.querySelectorAll("#days-row input").forEach(i => {
+        i.checked = (r.rule.days || []).includes(+i.value);
+        i.parentElement.classList.toggle("checked", i.checked);
+      });
+    }
+    document.querySelectorAll("#channels-row input").forEach(i => {
+      i.checked = r.channels.includes(i.value);
+      i.parentElement.classList.toggle("checked", i.checked);
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  window.fireNow = async id => {
+    const res = await api("/api/fire", "POST", { id });
+    const parts = Object.entries(res.results || {})
+      .map(([ch, r]) => channelName(ch) + (r.ok ? "✓" : "✗ " + r.message));
+    toast(parts.join("；") || "未选择任何渠道",
+          Object.values(res.results || {}).every(r => r.ok));
+  };
+
+  window.askDelete = id => {
+    deletingId = id;
+    $("delete-modal").classList.add("show");
+  };
+  window.closeDeleteModal = () => {
+    deletingId = null;
+    $("delete-modal").classList.remove("show");
+  };
+  $("btn-confirm-delete").onclick = async () => {
+    if (deletingId) {
+      await api("/api/reminders/" + deletingId, "DELETE");
+      toast("已删除");
+      loadReminders();
+    }
+    closeDeleteModal();
+  };
+
+  // ---------- 渠道设置 ----------
+  async function loadSettings() {
+    const s = await api("/api/settings");
+    $("s-wecom-webhook").value = "";
+    $("s-wecom-webhook").placeholder = s.wecom.webhook_configured ? "已保存 Webhook，留空保持不变" : "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...";
+    $("s-email-host").value = s.email.smtp_host || "";
+    $("s-email-port").value = s.email.smtp_port || "";
+    $("s-email-account").value = s.email.account || "";
+    $("s-email-code").value = "";
+    $("s-email-code").placeholder = s.email.auth_code_configured ? "已保存授权码，留空保持不变" : "请输入 SMTP 授权码";
+    $("s-email-to").value = s.email.to || "";
+    // 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消下面两行注释
+    // $("s-serverchan-key").value = s.serverchan.sendkey || "";
+    // $("s-pushplus-token").value = s.pushplus.token || "";
+  }
+
+  window.saveSettings = async which => {
+    let payload = {};
+    if (which === "wecom") {
+      payload.wecom = { webhook: $("s-wecom-webhook").value.trim() };
+    } else if (which === "email") {
+      payload.email = {
+        smtp_host: $("s-email-host").value.trim(),
+        smtp_port: parseInt($("s-email-port").value) || 465,
+        account: $("s-email-account").value.trim(),
+        auth_code: $("s-email-code").value.trim(),
+        to: $("s-email-to").value.trim()
+      };
+    }
+    // 【2026-10-13 删除】Server酱/PushPlus 渠道已停用，如需恢复取消下面五行注释
+    // else if (which === "serverchan") {
+    //   payload.serverchan = { sendkey: $("s-serverchan-key").value.trim() };
+    // } else if (which === "pushplus") {
+    //   payload.pushplus = { token: $("s-pushplus-token").value.trim() };
+    // }
+    await api("/api/settings", "PUT", payload);
+    await loadSettings();
+    toast("已保存");
+  };
+
+  window.testChannel = async ch => {
+    if (ch !== "browser") {
+      // 先保存当前页面上的配置再测试
+      if (["email", "wecom"].includes(ch)) {
+        await window.saveSettings(ch);
+      }
+      const res = await api("/api/test", "POST", { channel: ch });
+      toast(res.ok ? "发送成功，去查收吧！" : "发送失败：" + res.message, res.ok);
+    } else {
+      if (!pollEpoch) await pollBrowser(true);
+      await api("/api/test", "POST", { channel: "browser" });
+      await pollBrowser(true);
+    }
+  };
+
+  // ---------- 浏览器通知 ----------
+  $("btn-notify-perm").onclick = async () => {
+    if (!("Notification" in window)) {
+      toast("当前浏览器不支持通知", false); return;
+    }
+    const perm = await Notification.requestPermission();
+    toast(perm === "granted" ? "已授权浏览器通知" : "未授权，可在浏览器地址栏设置", perm === "granted");
+  };
+
+  let lastPollTs = 0;
+  let pollEpoch = "";
+  async function pollBrowser(once) {
+    if (!authenticated || polling) return;
+    polling = true;
+    try {
+      const res = await api("/api/poll?since=" + lastPollTs + "&epoch=" + encodeURIComponent(pollEpoch));
+      if (!authenticated) return;
+      lastPollTs = res.cursor;
+      pollEpoch = res.epoch;
+      res.events.forEach(e => {
+        toast(e.content);
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("⏰ 提醒", { body: e.content });
+        }
+      });
+    } catch (err) {
+      if (authenticated) toast("通知连接中断，正在自动重试", false);
+    } finally {
+      polling = false;
+      // Schedule in finally so initial requests and network errors cannot stop polling.
+      if (authenticated) {
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(() => pollBrowser(false), 15000);
+      }
+    }
+  }
+
+  // ---------- 初始化 ----------
+  buildCheckboxes();
+  $("f-date").value = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
+  (async () => {
+    try {
+      const info = await api("/api/session");
+      csrfToken = info.csrf;
+      if (info.authenticated) await showApp();
+      else showLogin();
+    } catch (error) {
+      showLogin();
+      $("login-error").textContent = "无法连接服务，请稍后重试";
+    }
+  })();
+})();
+</script>
+</body>
+</html>

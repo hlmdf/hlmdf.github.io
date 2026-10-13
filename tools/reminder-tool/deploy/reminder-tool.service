@@ -1,0 +1,26 @@
+[Unit]
+Description=Private reminder tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reminder-tool
+Group=reminder-tool
+WorkingDirectory=/opt/reminder-tool
+Environment=REMINDER_DATA_DIR=/var/lib/reminder-tool
+Environment=REMINDER_AUTH_FILE=/var/lib/reminder-tool/auth.json
+Environment=REMINDER_PORT=8002
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/reminder-tool/.venv/bin/python /opt/reminder-tool/server.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/reminder-tool
+
+[Install]
+WantedBy=multi-user.target

@@ -48,3 +48,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Reminder service: never publish credentials, live data or local runtimes.
+/tools/reminder-tool/.venv/
+/tools/reminder-tool/data/
+/tools/reminder-tool/__pycache__/
+/tools/reminder-tool/auth.json
+/tools/reminder-tool/*.zip
+/tools/reminder-tool/.preview*

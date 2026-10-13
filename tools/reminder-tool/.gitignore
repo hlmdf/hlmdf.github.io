@@ -1,0 +1,8 @@
+.venv/
+data/
+auth.json
+__pycache__/
+*.zip
+.preview*
+backup-*/
+.nginx-backup-path
