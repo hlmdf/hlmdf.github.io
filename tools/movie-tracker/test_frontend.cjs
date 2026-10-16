@@ -52,7 +52,6 @@ assert.ok(resultList.innerHTML.includes('蒙冤入狱'));
 context.isAdmin = true;
 context.posterStyle = () => '#000';
 context.rateLabels = ['', '很差', '较差', '还行', '推荐', '力荐'];
-context.introCache = {};
 context.posterUrl = value => value;
 context.relayAttr = () => '';
 const rateBody = {innerHTML: ''};
@@ -68,7 +67,7 @@ const want = context.cardHtml({id: 'm3', title: '丙', status: 'want', type: 'mo
 assert.equal(want.includes('rate-btn'), false);
 context.paintRateDialog({id: 'm1', title: '甲', personalRating: 4, director: '导演甲', actors: ['演员甲'], year: 1994, poster: ''});
 assert.ok(rateBody.innerHTML.includes('当前 4 星'));
-assert.ok(rateBody.innerHTML.indexOf('rate-dialog-stars') < rateBody.innerHTML.indexOf('rate-intro'));
+assert.equal(rateBody.innerHTML.includes('rate-intro'), false);
 assert.ok(rateBody.innerHTML.includes('导演甲'));
 assert.ok(rateBody.innerHTML.includes('演员甲'));
 assert.ok(rateBody.innerHTML.includes('data-stars="5"'));

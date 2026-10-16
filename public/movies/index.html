@@ -671,10 +671,13 @@
   .rdelete:hover { background: #e05a4e; color: #fff; }
   #rateMask { z-index: 1200; }
   #rateMask .detail-year { display: block; margin: 6px 0 0; }
+  #rateMask .detail-poster { align-self: start; height: 360px; }
+  @media (max-width: 640px) {
+    #rateMask .detail-poster { height: 240px; }
+  }
   #confirmMask { z-index: 1300; }
   .rate-copy { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--text); }
   .rate-copy span { color: var(--accent); margin-right: 8px; }
-  .rate-intro { margin-top: 14px; font-size: 13px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; }
   .rate-dialog-stars { display: flex; align-items: center; gap: 4px; margin-top: 14px; }
   .rate-dialog-stars button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 30px; line-height: 1; padding: 0; }
   .rate-dialog-stars button.on { color: #e5a43b; }
@@ -1133,7 +1136,6 @@
   var lastSearchList = [];
   var lastSearchKeyword = "";
   var rateItemId = "";
-  var introCache = {};
 
   function api(path, opts) {
     opts = opts || {};
@@ -2187,7 +2189,6 @@
 
   function paintRateDialog(item) {
     var mine = Number(item.personalRating) || 0;
-    var intro = introCache[item.id] || item.intro || "";
     var poster = posterUrl(item.poster);
     var posterImg = poster
       ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
@@ -2208,24 +2209,13 @@
         '<div class="rate-copy"><span>主演</span>' + esc(actors || "暂无") + "</div>" +
         '<div class="rate-dialog-stars" role="group" aria-label="我的评分">' + stars + "</div>" +
         '<div class="rate-dialog-label">' + (mine ? "当前 " + mine + " 星 · " + rateLabels[mine] + "，点一下修改" : "还没有评分，点一下给分") + "</div>" +
-        '<div class="rate-intro">' + esc(intro || (introCache[item.id] === "" ? "暂无简介" : "简介加载中…")) + "</div>" +
       "</div>";
   }
 
   function openRateDialog(item) {
     rateItemId = item.id;
-    var sid = doubanSubjectId(item.douban);
-    if (!sid && introCache[item.id] == null) introCache[item.id] = "";
     paintRateDialog(item);
     rateMask.classList.add("show");
-    if (!sid || introCache[item.id] != null) return;
-    api("/api/intro?sid=" + encodeURIComponent(sid) + "&type=" + (item.type === "tv" ? "tv" : "movie")).then(function (data) {
-      introCache[item.id] = (data && data.intro) || "";
-      if (rateItemId === item.id) paintRateDialog(item);
-    }).catch(function () {
-      introCache[item.id] = "";
-      if (rateItemId === item.id) paintRateDialog(item);
-    });
   }
 
   function closeRateDialog() {
