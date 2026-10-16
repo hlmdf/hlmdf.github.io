@@ -42,6 +42,38 @@ assert.ok(resultList.innerHTML.includes('已添加过 · 看过'));
 assert.ok(resultList.innerHTML.includes('已添加过 · 想看'));
 rows[0].click(); rows[1].click(); assert.equal(added, 0);
 rows[2].click(); assert.equal(added, 1, 'Different Douban IDs with identical names must remain addable');
+context.renderSearchResults([{
+  title: '有简介', year: '1994', url: 'https://movie.douban.com/subject/300/',
+  director: '弗兰克·德拉邦特', actors: '蒂姆·罗宾斯 / 摩根·弗里曼', regions: '美国', genres: '剧情', intro: '蒙冤入狱'
+}], '电影');
+assert.ok(resultList.innerHTML.includes('导演'));
+assert.ok(resultList.innerHTML.includes('蒂姆·罗宾斯 / 摩根·弗里曼'));
+assert.ok(resultList.innerHTML.includes('蒙冤入狱'));
+context.isAdmin = true;
+context.rateOpenId = 'm1';
+context.posterStyle = () => '#000';
+vm.runInContext(declared('cardHtml'), context);
+const rated = context.cardHtml({id: 'm1', title: '甲', status: 'watched', personalRating: 4, type: 'movie', actors: [], regions: [], genres: []});
+assert.ok(rated.includes('当前 4 星'));
+assert.ok(rated.includes('data-stars="5"'));
+const blank = context.cardHtml({id: 'm2', title: '乙', status: 'watched', personalRating: '', type: 'movie', actors: [], regions: [], genres: []});
+assert.ok(blank.includes('>评分</button>'));
+assert.equal(blank.includes('rate-pop'), false);
+const want = context.cardHtml({id: 'm3', title: '丙', status: 'want', type: 'movie', actors: [], regions: [], genres: []});
+assert.equal(want.includes('rate-btn'), false);
+let reminded = '';
+context.saving = false;
+context.rateLabels = ['', '很差', '较差', '还行', '推荐', '力荐'];
+context.askConfirm = text => { reminded = text; };
+context.doubanSubjectId = () => '1';
+context.render = () => {};
+context.savePersonalRating = () => { context.saved = true; };
+context.api = () => Promise.resolve({ loggedIn: true });
+vm.runInContext(declared('choosePersonalRating'), context);
+context.choosePersonalRating({title: '甲', personalRating: 4, douban: 'https://movie.douban.com/subject/1/'}, 5);
+assert.ok(reminded.includes('覆盖豆瓣'));
+assert.equal(context.saved, undefined);
+context.choosePersonalRating({title: '乙', personalRating: '', douban: 'https://movie.douban.com/subject/1/'}, 3);
 
 // Run the real management-password submit handler with isolated form/session mocks.
 const nodes = new Map();
@@ -64,6 +96,8 @@ const start = source.indexOf('  passwordForm.addEventListener("submit"');
 const end = source.indexOf('\n  });', start) + 6;
 vm.runInContext(source.slice(start, end), context);
 (async () => {
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(context.saved, true);
   node('currentAdminPassword').value = 'old'; node('newAdminPassword').value = '1'; node('confirmAdminPassword').value = '1';
   failure = true;
   context.passwordForm.submit({ preventDefault() {} });

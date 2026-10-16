@@ -586,7 +586,7 @@
   .result-item {
     display: flex;
     gap: 12px;
-    align-items: center;
+    align-items: flex-start;
     background: var(--bg);
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -596,17 +596,31 @@
   }
   .result-item:hover { border-color: var(--accent); background: var(--card-hover); }
   .result-item .thumb {
-    width: 42px;
-    height: 60px;
+    width: 54px;
+    height: 78px;
     border-radius: 6px;
     object-fit: cover;
     background: var(--line);
     flex-shrink: 0;
   }
+  .result-item .rbody { min-width: 0; flex: 1; }
   .result-item .rtitle { font-size: 14px; font-weight: 600; }
   .result-item .rsub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .result-item .rmeta { font-size: 12px; color: var(--text); margin-top: 3px; line-height: 1.5; }
+  .result-item .rmeta span { color: var(--accent); margin-right: 6px; }
+  .result-item .rintro {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .result-item .rtype {
     margin-left: auto;
+    align-self: flex-start;
     font-size: 12px;
     color: var(--muted);
     border: 1px solid var(--line);
@@ -614,6 +628,47 @@
     padding: 2px 10px;
     flex-shrink: 0;
   }
+  .rate-btn {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    z-index: 3;
+    border: none;
+    border-radius: 999px;
+    background: rgba(0,0,0,.62);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+  }
+  .rate-btn:hover { background: var(--accent); color: #111; }
+  .rate-pop {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 42px;
+    z-index: 4;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    background: rgba(12,15,20,.9);
+  }
+  .rate-pop button {
+    border: none;
+    background: none;
+    color: rgba(255,255,255,.45);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 1px;
+  }
+  .rate-pop button.on { color: #e5a43b; }
+  .rate-label { width: 100%; color: rgba(255,255,255,.8); font-size: 12px; }
   .result-item.added { opacity: .65; cursor: default; }
   .result-item.added .rtype { color: var(--watched); border-color: var(--watched); }
   .switch-line {
@@ -1060,6 +1115,7 @@
   var saving = false;
   var lastSearchList = [];
   var lastSearchKeyword = "";
+  var rateOpenId = "";
 
   function api(path, opts) {
     opts = opts || {};
@@ -1239,6 +1295,20 @@
     var poster = posterUrl(item.poster);
     var posterImg = poster
       ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' loading="lazy" alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var rateControl = "";
+    if (isAdmin && item.status === "watched") {
+      var mine = Number(item.personalRating) || 0;
+      var labels = ["", "很差", "较差", "还行", "推荐", "力荐"];
+      var stars = "";
+      if (rateOpenId === item.id) {
+        stars = '<div class="rate-pop" role="group" aria-label="我的评分">';
+        for (var star = 1; star <= 5; star++) {
+          stars += '<button type="button" class="rate-star' + (star <= mine ? " on" : "") + '" data-stars="' + star + '" aria-label="' + star + "星 " + labels[star] + '">' + (star <= mine ? "★" : "☆") + "</button>";
+        }
+        stars += '<span class="rate-label">' + (mine ? "当前 " + mine + " 星 · " + labels[mine] + "，点一下修改" : "点一下给分") + "</span></div>";
+      }
+      rateControl = '<button type="button" class="rate-btn">' + (mine ? "评分 " + mine + " 星" : "评分") + "</button>" + stars;
+    }
 
     return '' +
     '<div class="card" role="button" tabindex="0" aria-label="' + esc(item.title) + '" data-id="' + esc(item.id) + '">' +
@@ -1257,6 +1327,7 @@
             '</div>'
           : '<span class="badge status ' + statusCls + '">' + statusName(item.status) + '</span>') +
         ratingBadge +
+        rateControl +
       '</div>' +
       '<div class="info">' +
         '<div class="title-row">' +
@@ -1503,6 +1574,21 @@
 
   /* ==================== 豆瓣搜索 ==================== */
   // 依次尝试：自己服务器上的中转（最稳）→ 公共代理（国内网络下可能被拦）
+  function peopleText(text) {
+    return String(text || "").split(/\s+/).filter(Boolean).join(" / ");
+  }
+
+  function parseCardSubtitle(text) {
+    var parts = String(text || "").split("/").map(function (part) { return part.trim(); }).filter(Boolean);
+    if (parts.length && /^(?:19|20)\d{2}$/.test(parts[0])) parts.shift();
+    return {
+      regions: parts[0] || "",
+      genres: parts[1] || "",
+      director: parts[2] || "",
+      actors: parts[3] || ""
+    };
+  }
+
   function normalizeSuggest(data) {
     if (Array.isArray(data)) return data;
     var items = data && data.items;
@@ -1511,12 +1597,18 @@
       var target = item && item.target;
       var kind = item && item.target_type;
       if (!target || !target.id || (kind !== "movie" && kind !== "tv")) return null;
+      var extra = parseCardSubtitle(target.card_subtitle);
       return {
         title: target.title || "",
         year: target.year || "",
         img: target.cover_url || "",
         url: "https://movie.douban.com/subject/" + target.id + "/",
-        episode: kind === "tv" ? "1" : ""
+        episode: kind === "tv" ? "1" : "",
+        director: peopleText(extra.director),
+        actors: peopleText(extra.actors),
+        regions: extra.regions,
+        genres: extra.genres,
+        intro: ""
       };
     }).filter(Boolean);
   }
@@ -1650,14 +1742,17 @@
     searchStatus.textContent = "点一下就加入「" + statusName(addStatus) + "」：";
     resultList.innerHTML = list.map(function (r, i) {
       var isTv = r.episode && r.episode !== "0" && r.episode !== "";
-      var url = (r.url || "").split("?")[0];
       var listed = listedMovie(r);
+      var bits = [r.year, r.regions, r.genres].filter(Boolean);
       return '<div class="result-item' + (listed ? ' added' : '') + '" data-i="' + i + '"' +
         (listed ? ' aria-disabled="true" title="片单中已有这部影片"' : '') + '>' +
         (r.img ? '<img class="thumb" src="' + esc(r.img) + '"' + relayAttr(r.img) + ' referrerpolicy="no-referrer" onerror="imgErr(this)">' : '<div class="thumb"></div>') +
-        '<div>' +
+        '<div class="rbody">' +
           '<div class="rtitle">' + esc(r.title) + '</div>' +
-          '<div class="rsub">' + esc(r.year || "") + '</div>' +
+          (bits.length ? '<div class="rsub">' + esc(bits.join(" · ")) + '</div>' : '') +
+          (r.director ? '<div class="rmeta"><span>导演</span>' + esc(r.director) + '</div>' : '') +
+          (r.actors ? '<div class="rmeta"><span>主演</span>' + esc(r.actors) + '</div>' : '') +
+          (r.intro ? '<div class="rintro">' + esc(r.intro) + '</div>' : '') +
         '</div>' +
         '<span class="rtype">' + (listed ? "已添加过 · " + statusName(listed.status) : (isTv ? "剧集" : "电影")) + '</span>' +
       '</div>';
@@ -1783,8 +1878,8 @@
     });
   }
 
-  function openDoubanLoginForAdd() {
-    doubanLoginStatus.textContent = "登录后会把刚才那部写进豆瓣";
+  function openDoubanLoginForAdd(message) {
+    doubanLoginStatus.textContent = message || "登录后会把刚才那部写进豆瓣";
     showDoubanLogin();
     doubanImportMask.classList.add("show");
     setTimeout(function () { document.getElementById("doubanPhone").focus(); }, 50);
@@ -1980,6 +2075,18 @@
     if (!item) return;
 
     if (e.target.closest(".status-select")) return; // 状态下拉由 change 事件处理
+    if (e.target.closest(".rate-btn")) {
+      if (!mustAdmin()) return;
+      rateOpenId = rateOpenId === item.id ? "" : item.id;
+      render();
+      return;
+    }
+    var starBtn = e.target.closest(".rate-star");
+    if (starBtn) {
+      if (!mustAdmin()) return;
+      choosePersonalRating(item, Number(starBtn.getAttribute("data-stars")));
+      return;
+    }
 
     if (e.target.closest(".edit-btn")) { openEditModal(item); return; }
     if (e.target.closest(".del-btn")) { askDelete(item); return; }
@@ -1990,11 +2097,79 @@
   mainEl.addEventListener("keydown", function (e) {
     if (e.key !== "Enter" && e.key !== " ") return;
     var card = e.target.closest(".card");
-    if (!card || e.target.closest(".status-select, .edit-btn, .del-btn")) return;
+    if (!card || e.target.closest(".status-select, .edit-btn, .del-btn, .rate-btn, .rate-pop")) return;
     e.preventDefault();
     var item = items.find(function (m) { return m.id === card.getAttribute("data-id"); });
     if (item) openDetail(item);
   });
+
+  var rateLabels = ["", "很差", "较差", "还行", "推荐", "力荐"];
+
+  function choosePersonalRating(item, stars) {
+    if (!stars || stars < 1 || stars > 5 || saving) return;
+    var current = Number(item.personalRating) || 0;
+    if (current === stars) {
+      rateOpenId = "";
+      render();
+      return;
+    }
+    function start() {
+      if (!doubanSubjectId(item.douban)) {
+        askConfirm("这部没有豆瓣链接，只会改这个页面，不会同步到豆瓣。", function () {
+          savePersonalRating(item, stars, false);
+        }, { title: "无法同步", ok: "只改这里", okClass: "btn-save" });
+        return;
+      }
+      api("/api/douban/session").then(function (session) {
+        if (session.loggedIn) {
+          savePersonalRating(item, stars, true);
+          return;
+        }
+        askConfirm("还没登录豆瓣。要把评分写进豆瓣，需要先登录。", function () {
+          pendingDoubanAdd = { kind: "rating", item: item, stars: stars };
+          openDoubanLoginForAdd("登录后会把《" + item.title + "》的评分写进豆瓣");
+        }, {
+          title: "同步到豆瓣",
+          ok: "登录并同步",
+          okClass: "btn-save",
+          alt: "只改这里",
+          altAction: function () { savePersonalRating(item, stars, false); }
+        });
+      }).catch(function () {
+        toast("没能确认豆瓣登录状态");
+      });
+    }
+    if (current) {
+      askConfirm("《" + item.title + "》现在是 " + current + " 星（" + rateLabels[current] + "）。改成 " + stars + " 星会覆盖豆瓣上原来的评分。", start, {
+        title: "修改评分",
+        ok: "确认修改",
+        okClass: "btn-save"
+      });
+      return;
+    }
+    start();
+  }
+
+  function savePersonalRating(item, stars, sync) {
+    var body = {};
+    Object.keys(item).forEach(function (key) { body[key] = item[key]; });
+    body.personalRating = stars;
+    body.syncDouban = !!sync;
+    saving = true;
+    rateOpenId = "";
+    api("/api/movies/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
+      saving = false;
+      applyList(res);
+      var note = "";
+      if (res.doubanSync && res.doubanSync.ok) note = "，已同步到豆瓣";
+      else if (res.doubanSync && res.doubanSync.ok === false) note = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+      toast("《" + item.title + "》已评为 " + stars + " 星" + note, note.indexOf("没写进") === -1 ? 2200 : 4200);
+    }).catch(function (err) {
+      saving = false;
+      render();
+      toast(err.message || "评分失败");
+    });
+  }
 
   function saveStatus(item, next, sync) {
     var body = {};
@@ -2389,6 +2564,7 @@
       pendingDoubanAdd = null;
       doubanImportMask.classList.remove("show");
       if (pending.kind === "status") saveStatus(pending.item, pending.next, true);
+      else if (pending.kind === "rating") savePersonalRating(pending.item, pending.stars, true);
       else postMovie(pending.data, true, pending.el);
     }
   }
@@ -2406,10 +2582,10 @@
   function closeDoubanImport() {
     doubanImportMask.classList.remove("show");
     if (pendingDoubanAdd) {
-      var wasStatus = pendingDoubanAdd.kind === "status";
+      var wasEdit = pendingDoubanAdd.kind === "status" || pendingDoubanAdd.kind === "rating";
       pendingDoubanAdd = null;
-      if (wasStatus) render();
-      toast(wasStatus ? "没有修改" : "这部还没加上");
+      if (wasEdit) render();
+      toast(wasEdit ? "没有修改" : "这部还没加上");
     }
   }
   document.getElementById("doubanImportCancel").addEventListener("click", function () {

@@ -18,6 +18,7 @@
      movies.json 里的片单还在。
 """
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import hmac
 import html
@@ -296,6 +297,71 @@ def new_id():
 SUBJECT_RE = re.compile(r"subject/(\d+)")
 
 
+def people_line(text):
+    return " / ".join(part for part in re.split(r"\s+", str(text or "").strip()) if part)
+
+
+def parse_card_subtitle(text):
+    """豆瓣搜索副标题一般是：地区 / 类型 / 导演 / 主演。年份有时会放在最前面。"""
+    parts = [part.strip() for part in re.split(r"\s*/\s*", str(text or "")) if part.strip()]
+    if parts and re.fullmatch(r"(?:19|20)\d{2}", parts[0]):
+        parts = parts[1:]
+
+    def take(index):
+        return parts[index] if len(parts) > index else ""
+
+    return {
+        "regions": take(0),
+        "genres": take(1),
+        "director": people_line(take(2)),
+        "actors": people_line(take(3)),
+    }
+
+
+def fetch_search_intro(kind, sid):
+    paths = ("tv", "movie") if kind == "tv" else ("movie", "tv")
+    for path in paths:
+        url = "https://m.douban.com/rexxar/api/v2/%s/%s" % (path, sid)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": DOUBAN_UA,
+            "Referer": "https://m.douban.com/search/",
+            "Accept": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=4) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        intro = re.sub(r"\s+", " ", str(data.get("intro") or "")).strip()
+        if intro:
+            return intro[:160]
+    return ""
+
+
+def attach_search_intros(results):
+    pending = []
+    for item in results:
+        match = SUBJECT_RE.search(item.get("url") or "")
+        if match:
+            pending.append((item, "tv" if item.get("episode") else "movie", match.group(1)))
+    if not pending:
+        return
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {
+            pool.submit(fetch_search_intro, kind, sid): item
+            for item, kind, sid in pending
+        }
+        for future in as_completed(futures):
+            try:
+                intro = future.result()
+            except Exception:
+                intro = ""
+            if intro:
+                futures[future]["intro"] = intro
+
+
 def suggest_douban(keyword, start=0):
     """豆瓣原来的 subject_suggest 现在直接返回空列表，改走移动端搜索。"""
     url = "https://m.douban.com/rexxar/api/v2/search/movie?q=%s&count=10&start=%d" % (urllib.parse.quote(keyword), start)
@@ -318,13 +384,20 @@ def suggest_douban(keyword, start=0):
         sid = str(target.get("id") or "")
         if kind not in ("movie", "tv") or not sid.isdigit():
             continue
+        extra = parse_card_subtitle(target.get("card_subtitle"))
         out.append({
             "title": target.get("title") or "",
             "year": str(target.get("year") or ""),
             "img": target.get("cover_url") or "",
             "url": "https://movie.douban.com/subject/%s/" % sid,
             "episode": "1" if kind == "tv" else "",
+            "director": extra["director"],
+            "actors": extra["actors"],
+            "regions": extra["regions"],
+            "genres": extra["genres"],
+            "intro": "",
         })
+    attach_search_intros(out)
     next_start = start + len(items)
     total = data.get("total")
     has_more = bool(items) and (next_start < total if isinstance(total, int) else len(items) >= 10)
