@@ -617,10 +617,25 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    cursor: help;
+  }
+  .result-item .rintro:hover,
+  .result-item .rintro:focus-visible {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+    color: var(--text);
+  }
+  .result-item .rside {
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
   }
   .result-item .rtype {
-    margin-left: auto;
-    align-self: flex-start;
+    align-self: flex-end;
     font-size: 12px;
     color: var(--muted);
     border: 1px solid var(--line);
@@ -644,31 +659,26 @@
     backdrop-filter: blur(6px);
   }
   .rate-btn:hover { background: var(--accent); color: #111; }
-  .rate-pop {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 42px;
-    z-index: 4;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px 4px;
-    padding: 6px 8px;
-    border-radius: 10px;
-    background: rgba(12,15,20,.9);
-  }
-  .rate-pop button {
-    border: none;
-    background: none;
-    color: rgba(255,255,255,.45);
-    font-size: 22px;
-    line-height: 1;
+  .rdelete {
+    border: 1px solid #e05a4e;
+    background: transparent;
+    color: #e05a4e;
+    border-radius: 999px;
+    font-size: 12px;
+    padding: 2px 10px;
     cursor: pointer;
-    padding: 0 1px;
   }
-  .rate-pop button.on { color: #e5a43b; }
-  .rate-label { width: 100%; color: rgba(255,255,255,.8); font-size: 12px; }
+  .rdelete:hover { background: #e05a4e; color: #fff; }
+  #rateMask { z-index: 1200; }
+  #rateMask .detail-year { display: block; margin: 6px 0 0; }
+  #confirmMask { z-index: 1300; }
+  .rate-copy { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--text); }
+  .rate-copy span { color: var(--accent); margin-right: 8px; }
+  .rate-intro { margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; }
+  .rate-dialog-stars { display: flex; align-items: center; gap: 4px; margin-top: 16px; }
+  .rate-dialog-stars button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 30px; line-height: 1; padding: 0; }
+  .rate-dialog-stars button.on { color: #e5a43b; }
+  .rate-dialog-label { margin-top: 6px; color: var(--muted); font-size: 13px; }
   .result-item.added { opacity: .65; cursor: default; }
   .result-item.added .rtype { color: var(--watched); border-color: var(--watched); }
   .switch-line {
@@ -1064,6 +1074,13 @@
   </form>
 </div>
 
+<div class="modal-mask" id="rateMask">
+  <div class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="rateTitle">
+    <button type="button" class="detail-close" id="rateClose" aria-label="关闭">✕</button>
+    <div class="detail-layout" id="rateBody"></div>
+  </div>
+</div>
+
 <div class="modal-mask" id="detailMask">
   <div class="modal detail-modal" role="dialog" aria-labelledby="detailTitle">
     <button type="button" class="detail-close" id="detailClose" aria-label="关闭">✕</button>
@@ -1115,7 +1132,8 @@
   var saving = false;
   var lastSearchList = [];
   var lastSearchKeyword = "";
-  var rateOpenId = "";
+  var rateItemId = "";
+  var introCache = {};
 
   function api(path, opts) {
     opts = opts || {};
@@ -1298,16 +1316,7 @@
     var rateControl = "";
     if (isAdmin && item.status === "watched") {
       var mine = Number(item.personalRating) || 0;
-      var labels = ["", "很差", "较差", "还行", "推荐", "力荐"];
-      var stars = "";
-      if (rateOpenId === item.id) {
-        stars = '<div class="rate-pop" role="group" aria-label="我的评分">';
-        for (var star = 1; star <= 5; star++) {
-          stars += '<button type="button" class="rate-star' + (star <= mine ? " on" : "") + '" data-stars="' + star + '" aria-label="' + star + "星 " + labels[star] + '">' + (star <= mine ? "★" : "☆") + "</button>";
-        }
-        stars += '<span class="rate-label">' + (mine ? "当前 " + mine + " 星 · " + labels[mine] + "，点一下修改" : "点一下给分") + "</span></div>";
-      }
-      rateControl = '<button type="button" class="rate-btn">' + (mine ? "评分 " + mine + " 星" : "评分") + "</button>" + stars;
+      rateControl = '<button type="button" class="rate-btn">' + (mine ? "评分 " + mine + " 星" : "评分") + "</button>";
     }
 
     return '' +
@@ -1752,17 +1761,25 @@
           (bits.length ? '<div class="rsub">' + esc(bits.join(" · ")) + '</div>' : '') +
           (r.director ? '<div class="rmeta"><span>导演</span>' + esc(r.director) + '</div>' : '') +
           (r.actors ? '<div class="rmeta"><span>主演</span>' + esc(r.actors) + '</div>' : '') +
-          (r.intro ? '<div class="rintro">' + esc(r.intro) + '</div>' : '') +
+          (r.intro ? '<div class="rintro" tabindex="0" title="停留查看完整简介">' + esc(r.intro) + '</div>' : '') +
         '</div>' +
-        '<span class="rtype">' + (listed ? "已添加过 · " + statusName(listed.status) : (isTv ? "剧集" : "电影")) + '</span>' +
+        '<div class="rside">' +
+          '<span class="rtype">' + (listed ? "已添加过 · " + statusName(listed.status) : (isTv ? "剧集" : "电影")) + '</span>' +
+          (listed ? '<button type="button" class="rdelete">删除</button>' : '') +
+        '</div>' +
       '</div>';
     }).join("");
 
-    // 点击结果 = 直接添加
+    // 点击结果 = 直接添加；已在片单里的可以删除
     resultList.querySelectorAll(".result-item").forEach(function (el, i) {
-      el.addEventListener("click", function () {
+      el.addEventListener("click", function (event) {
         var r = list[i];
         if (!r) return;
+        if (event && event.target && event.target.closest && event.target.closest(".rdelete")) {
+          var listedItem = listedMovie(r);
+          if (listedItem && mustAdmin()) askDelete(listedItem);
+          return;
+        }
         if (listedMovie(r)) { toast("片单中已添加过《" + r.title + "》"); return; }
         var isTv = r.episode && r.episode !== "0" && r.episode !== "";
         if (!mustAdmin()) return;
@@ -2049,7 +2066,9 @@
   document.getElementById("detailClose").addEventListener("click", closeDetail);
   detailMask.addEventListener("click", function (e) { if (e.target === detailMask) closeDetail(); });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && detailMask.classList.contains("show")) closeDetail();
+    if (e.key !== "Escape") return;
+    if (rateMask.classList.contains("show")) { closeRateDialog(); return; }
+    if (detailMask.classList.contains("show")) closeDetail();
   });
 
   /* ==================== 卡片交互：详情 / 编辑 / 删除 / 状态切换 ==================== */
@@ -2077,14 +2096,7 @@
     if (e.target.closest(".status-select")) return; // 状态下拉由 change 事件处理
     if (e.target.closest(".rate-btn")) {
       if (!mustAdmin()) return;
-      rateOpenId = rateOpenId === item.id ? "" : item.id;
-      render();
-      return;
-    }
-    var starBtn = e.target.closest(".rate-star");
-    if (starBtn) {
-      if (!mustAdmin()) return;
-      choosePersonalRating(item, Number(starBtn.getAttribute("data-stars")));
+      openRateDialog(item);
       return;
     }
 
@@ -2097,7 +2109,7 @@
   mainEl.addEventListener("keydown", function (e) {
     if (e.key !== "Enter" && e.key !== " ") return;
     var card = e.target.closest(".card");
-    if (!card || e.target.closest(".status-select, .edit-btn, .del-btn, .rate-btn, .rate-pop")) return;
+    if (!card || e.target.closest(".status-select, .edit-btn, .del-btn, .rate-btn")) return;
     e.preventDefault();
     var item = items.find(function (m) { return m.id === card.getAttribute("data-id"); });
     if (item) openDetail(item);
@@ -2108,11 +2120,7 @@
   function choosePersonalRating(item, stars) {
     if (!stars || stars < 1 || stars > 5 || saving) return;
     var current = Number(item.personalRating) || 0;
-    if (current === stars) {
-      rateOpenId = "";
-      render();
-      return;
-    }
+    if (current === stars) return;
     function start() {
       if (!doubanSubjectId(item.douban)) {
         askConfirm("这部没有豆瓣链接，只会改这个页面，不会同步到豆瓣。", function () {
@@ -2156,10 +2164,14 @@
     body.personalRating = stars;
     body.syncDouban = !!sync;
     saving = true;
-    rateOpenId = "";
+    var openId = rateItemId;
     api("/api/movies/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
       saving = false;
       applyList(res);
+      if (openId && rateItemId === openId) {
+        var updated = items.find(function (movie) { return movie.id === openId; });
+        if (updated) paintRateDialog(updated);
+      }
       var note = "";
       if (res.doubanSync && res.doubanSync.ok) note = "，已同步到豆瓣";
       else if (res.doubanSync && res.doubanSync.ok === false) note = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
@@ -2170,6 +2182,65 @@
       toast(err.message || "评分失败");
     });
   }
+
+  var rateMask = document.getElementById("rateMask");
+
+  function paintRateDialog(item) {
+    var mine = Number(item.personalRating) || 0;
+    var intro = introCache[item.id] || item.intro || "";
+    var poster = posterUrl(item.poster);
+    var posterImg = poster
+      ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var stars = "";
+    for (var star = 1; star <= 5; star++) {
+      stars += '<button type="button" class="rate-star' + (star <= mine ? " on" : "") + '" data-stars="' + star + '" aria-label="' + star + "星 " + rateLabels[star] + '">' + (star <= mine ? "★" : "☆") + "</button>";
+    }
+    var actors = (item.actors || []).join(" / ");
+    document.getElementById("rateBody").innerHTML =
+      '<div class="detail-poster" style="background:' + posterStyle(item.title) + '">' +
+        '<span class="initial">' + esc(item.title.charAt(0)) + "</span>" + posterImg +
+      "</div>" +
+      '<div class="detail-main">' +
+        '<h3 class="detail-title" id="rateTitle">' + esc(item.title) +
+          (item.year ? '<span class="detail-year">' + esc(item.year) + "</span>" : "") +
+        "</h3>" +
+        '<div class="rate-copy"><span>导演</span>' + esc(item.director || "暂无") + "</div>" +
+        '<div class="rate-copy"><span>主演</span>' + esc(actors || "暂无") + "</div>" +
+        '<div class="rate-intro">' + esc(intro || (introCache[item.id] === "" ? "暂无简介" : "简介加载中…")) + "</div>" +
+        '<div class="rate-dialog-stars" role="group" aria-label="我的评分">' + stars + "</div>" +
+        '<div class="rate-dialog-label">' + (mine ? "当前 " + mine + " 星 · " + rateLabels[mine] + "，点一下修改" : "还没有评分，点一下给分") + "</div>" +
+      "</div>";
+  }
+
+  function openRateDialog(item) {
+    rateItemId = item.id;
+    var sid = doubanSubjectId(item.douban);
+    if (!sid && introCache[item.id] == null) introCache[item.id] = "";
+    paintRateDialog(item);
+    rateMask.classList.add("show");
+    if (!sid || introCache[item.id] != null) return;
+    api("/api/intro?sid=" + encodeURIComponent(sid) + "&type=" + (item.type === "tv" ? "tv" : "movie")).then(function (data) {
+      introCache[item.id] = (data && data.intro) || "";
+      if (rateItemId === item.id) paintRateDialog(item);
+    }).catch(function () {
+      introCache[item.id] = "";
+      if (rateItemId === item.id) paintRateDialog(item);
+    });
+  }
+
+  function closeRateDialog() {
+    rateMask.classList.remove("show");
+    rateItemId = "";
+  }
+
+  document.getElementById("rateClose").addEventListener("click", closeRateDialog);
+  rateMask.addEventListener("click", function (event) {
+    if (event.target === rateMask) { closeRateDialog(); return; }
+    var starBtn = event.target.closest(".rate-star");
+    if (!starBtn || !rateItemId || !mustAdmin()) return;
+    var item = items.find(function (movie) { return movie.id === rateItemId; });
+    if (item) choosePersonalRating(item, Number(starBtn.getAttribute("data-stars")));
+  });
 
   function saveStatus(item, next, sync) {
     var body = {};

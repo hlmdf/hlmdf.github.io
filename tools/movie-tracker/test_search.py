@@ -35,8 +35,7 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(item['director'], '弗兰克·德拉邦特')
         self.assertEqual(item['actors'], '蒂姆·罗宾斯 / 摩根·弗里曼')
         self.assertEqual(item['regions'], '美国')
-        self.assertTrue(item['intro'].startswith('一场谋杀案'))
-        self.assertLessEqual(len(item['intro']), 160)
+        self.assertEqual(item['intro'], '一场谋杀案使银行家安迪蒙冤入狱。' * 20)
 
     def test_full_page_and_last_page(self):
         items = [{'target_type': 'tv', 'target': {'id': str(i), 'title': '剧集'}} for i in range(10)]

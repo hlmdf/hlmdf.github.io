@@ -336,7 +336,7 @@ def fetch_search_intro(kind, sid):
             continue
         intro = re.sub(r"\s+", " ", str(data.get("intro") or "")).strip()
         if intro:
-            return intro[:160]
+            return intro[:2000]
     return ""
 
 
@@ -1225,6 +1225,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"ok": True})
         if path == "/api/douban/session":
             return self.handle_douban_session()
+        if path == "/api/intro":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self.handle_intro(query.get("sid", [""])[0], query.get("type", ["movie"])[0])
         if path.startswith("/api/suggest"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self.handle_suggest(query.get("q", [""])[0].strip(), query.get("start", ["0"])[0])
@@ -1232,6 +1235,14 @@ class Handler(SimpleHTTPRequestHandler):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self.handle_img(query.get("url", [""])[0])
         self.send_json({"error": "没有这个接口"}, 404)
+
+    def handle_intro(self, sid, kind):
+        sid = str(sid or "")
+        if not re.fullmatch(r"\d{1,12}", sid):
+            return self.send_json({"error": "没有这部片子"}, 400)
+        if kind not in ("movie", "tv"):
+            kind = "movie"
+        return self.send_json({"intro": fetch_search_intro(kind, sid)})
 
     def handle_login(self):
         ip = client_ip_of(self)
