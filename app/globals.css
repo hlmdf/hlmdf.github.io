@@ -290,3 +290,16 @@
     transition: none;
   }
 }
+
+/* 【2026-10-16 新增】页脚访客地图：让 Leaflet 自己撑满容器 */
+.visitor-map .leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: var(--muted);
+  font-family: inherit;
+}
+
+/* 暗色模式下把地图瓦片反色，避免整块地图在深色界面上过亮 */
+.dark .visitor-map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9);
+}

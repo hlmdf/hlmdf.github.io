@@ -57,6 +57,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Visitor map runtime data stays on the server.
+/tools/visitor-map/data/
+/tools/visitor-map/__pycache__/
+/tools/visitor-map/*.zip
+
 # Reminder service: never publish credentials, live data or local runtimes.
 /tools/reminder-tool/.venv/
 /tools/reminder-tool/data/

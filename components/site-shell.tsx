@@ -6,6 +6,8 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { GraduationCap, Mail, MapPin, Menu, Moon, Sun, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderStatus } from "@/components/header-status";
+// 【2026-10-16 新增】页脚访客地图
+import { VisitorMap } from "@/components/visitor-map";
 import { toggleTheme, useSite } from "@/components/site-provider";
 import {
   isPlaceholderEmail,
@@ -563,6 +565,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
           <p>
             © {year} {pick(profile.name, lang)}
           </p>
+          {/* 【2026-10-16 新增】页脚访客地图：显示总访问次数，点开看世界地图 */}
+          <VisitorMap />
         </div>
       </footer>
     </div>

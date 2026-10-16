@@ -1,0 +1,24 @@
+[Unit]
+Description=Homepage visitor map
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=visitor-map
+Group=visitor-map
+WorkingDirectory=/opt/visitor-map
+Environment=VISITOR_DATA_DIR=/var/lib/visitor-map
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/visitor-map/server.py --host 127.0.0.1 --port 8010
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/visitor-map
+
+[Install]
+WantedBy=multi-user.target
