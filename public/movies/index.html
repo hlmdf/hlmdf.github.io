@@ -674,8 +674,8 @@
   #confirmMask { z-index: 1300; }
   .rate-copy { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--text); }
   .rate-copy span { color: var(--accent); margin-right: 8px; }
-  .rate-intro { margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; }
-  .rate-dialog-stars { display: flex; align-items: center; gap: 4px; margin-top: 16px; }
+  .rate-intro { margin-top: 14px; font-size: 13px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; }
+  .rate-dialog-stars { display: flex; align-items: center; gap: 4px; margin-top: 14px; }
   .rate-dialog-stars button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 30px; line-height: 1; padding: 0; }
   .rate-dialog-stars button.on { color: #e5a43b; }
   .rate-dialog-label { margin-top: 6px; color: var(--muted); font-size: 13px; }
@@ -2206,9 +2206,9 @@
         "</h3>" +
         '<div class="rate-copy"><span>导演</span>' + esc(item.director || "暂无") + "</div>" +
         '<div class="rate-copy"><span>主演</span>' + esc(actors || "暂无") + "</div>" +
-        '<div class="rate-intro">' + esc(intro || (introCache[item.id] === "" ? "暂无简介" : "简介加载中…")) + "</div>" +
         '<div class="rate-dialog-stars" role="group" aria-label="我的评分">' + stars + "</div>" +
         '<div class="rate-dialog-label">' + (mine ? "当前 " + mine + " 星 · " + rateLabels[mine] + "，点一下修改" : "还没有评分，点一下给分") + "</div>" +
+        '<div class="rate-intro">' + esc(intro || (introCache[item.id] === "" ? "暂无简介" : "简介加载中…")) + "</div>" +
       "</div>";
   }
 

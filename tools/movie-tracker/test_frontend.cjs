@@ -68,6 +68,7 @@ const want = context.cardHtml({id: 'm3', title: '丙', status: 'want', type: 'mo
 assert.equal(want.includes('rate-btn'), false);
 context.paintRateDialog({id: 'm1', title: '甲', personalRating: 4, director: '导演甲', actors: ['演员甲'], year: 1994, poster: ''});
 assert.ok(rateBody.innerHTML.includes('当前 4 星'));
+assert.ok(rateBody.innerHTML.indexOf('rate-dialog-stars') < rateBody.innerHTML.indexOf('rate-intro'));
 assert.ok(rateBody.innerHTML.includes('导演甲'));
 assert.ok(rateBody.innerHTML.includes('演员甲'));
 assert.ok(rateBody.innerHTML.includes('data-stars="5"'));
