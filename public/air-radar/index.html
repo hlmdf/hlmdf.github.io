@@ -189,8 +189,9 @@
   /* 默认视野：武汉上空 */
   var DEFAULT_CENTER = [30.6, 114.3];
   var DEFAULT_ZOOM = 7;
-  /* 6 秒拉一次新数据；间隙按航向 + 地速推算位置，飞机平滑滑行 */
-  var REFRESH_MS = 6000;
+  /* 【2026-10-28 修改】8 秒拉一次新数据（上游限流严格，越快越容易被限流返回空数据）；
+     间隙按航向 + 地速推算位置，飞机依然平滑滑行 */
+  var REFRESH_MS = 8000;
   var TICK_MS = 500;
   /* 飞出查询范围的飞机多留一会儿，避免边缘闪烁 */
   var STALE_MS = 30000;
@@ -224,16 +225,54 @@
     { subdomains: "1234", maxZoom: 18, attribution: "© 高德地图 | 航班数据 © adsb.lol" }
   ).addTo(map);
 
-  /* 虚线圈 = 当前查询覆盖范围 */
-  var coverageCircle = L.circle(DEFAULT_CENTER, {
-    radius: radiusForZoom(DEFAULT_ZOOM) * 1852,
-    color: "#4c8dff",
-    weight: 1,
-    opacity: 0.5,
-    dashArray: "4 4",
-    fillColor: "#4c8dff",
-    fillOpacity: 0.04
-  }).addTo(map);
+  /* 【2026-10-28 修改】虚线圈 = 当前查询覆盖范围（缩小地图时会有多个圈拼成一片） */
+  var circles = [];
+
+  function updateCircles(points, radiusMeters) {
+    while (circles.length > points.length) {
+      map.removeLayer(circles.pop());
+    }
+    points.forEach(function (p, i) {
+      if (circles[i]) {
+        circles[i].setLatLng(p).setRadius(radiusMeters);
+      } else {
+        circles[i] = L.circle(p, {
+          radius: radiusMeters,
+          color: "#4c8dff",
+          weight: 1,
+          opacity: 0.5,
+          dashArray: "4 4",
+          fillColor: "#4c8dff",
+          fillOpacity: 0.04
+        }).addTo(map);
+      }
+    });
+  }
+
+  /* 【2026-10-28 新增】决定这次要查哪些中心点。
+     放大时一个点就够；缩小到能看见半个中国时，单个查询圈只覆盖屏幕中间一小块，
+     所以用 2x2 四个点拼起来（服务端会逐点查询并去重合并）。 */
+  function queryPoints() {
+    var c = map.getCenter();
+    var zoom = map.getZoom();
+    var radius = radiusForZoom(zoom);
+    if (zoom >= 7) {
+      return { points: [[c.lat, c.lng]], radius: radius };
+    }
+    var Rkm = radius * 1.852;
+    var dLat = (Rkm * 0.75) / 111;
+    var cosLat = Math.cos((c.lat * Math.PI) / 180);
+    var dLon = Math.abs(cosLat) < 1e-6 ? 0 : (Rkm * 0.75) / (111 * cosLat);
+    return {
+      points: [
+        [c.lat + dLat, c.lng + dLon],
+        [c.lat + dLat, c.lng - dLon],
+        [c.lat - dLat, c.lng + dLon],
+        [c.lat - dLat, c.lng - dLon]
+      ],
+      radius: radius
+    };
+  }
 
   /* 已画在图上的飞机：hex -> {marker, lat, lon, track, gs, onGround, baseAt, seenAt} */
   var planes = new Map();
@@ -342,18 +381,38 @@
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
 
-    var center = map.getCenter();
-    var radius = radiusForZoom(map.getZoom());
-    coverageCircle.setLatLng([center.lat, center.lng]).setRadius(radius * 1852);
-    radiusEl.textContent = "覆盖半径约 " + Math.round(radius * 1.852) + " 公里";
+    var q = queryPoints();
+    var radius = q.radius;
+    updateCircles(q.points, radius * 1852);
+    radiusEl.textContent = "覆盖半径约 " + Math.round(radius * 1.852) + " 公里" +
+      (q.points.length > 1 ? "（" + q.points.length + " 点拼图）" : "");
 
-    var url = API + "/api/aircraft?lat=" + center.lat.toFixed(4) +
-      "&lon=" + center.lng.toFixed(4) + "&r=" + radius;
+    var lats = q.points.map(function (p) { return p[0].toFixed(4); }).join(",");
+    var lons = q.points.map(function (p) { return p[1].toFixed(4); }).join(",");
+    var url = API + "/api/aircraft?lat=" + lats + "&lon=" + lons + "&r=" + radius;
 
-    fetch(url, { cache: "no-store" })
-      .then(function (res) {
+    /* 【2026-10-28 新增】旧版服务端只认单个中心点（多点会返回 400），
+       万一服务端还没更新，自动退回单点查询，保证页面不是一片空白 */
+    function request(centerOnly) {
+      var u = url;
+      if (centerOnly) {
+        var c = map.getCenter();
+        u = API + "/api/aircraft?lat=" + c.lat.toFixed(4) + "&lon=" + c.lng.toFixed(4) + "&r=" + radius;
+      }
+      return fetch(u, { cache: "no-store" }).then(function (res) {
         if (!res.ok) throw new Error("radar api " + res.status);
         return res.json();
+      });
+    }
+
+    request(q.points.length === 1)
+      .catch(function () {
+        if (q.points.length === 1) throw new Error("radar api failed");
+        /* 退回单点：覆盖圈也同步收缩成一个，避免画出实际没查的区域 */
+        var c = map.getCenter();
+        updateCircles([[c.lat, c.lng]], radius * 1852);
+        radiusEl.textContent = "覆盖半径约 " + Math.round(radius * 1.852) + " 公里";
+        return request(true);
       })
       .then(function (data) {
         var list = (data && data.ac) || [];

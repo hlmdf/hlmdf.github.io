@@ -6,11 +6,13 @@
 - 纯 Python 标准库，不需要 pip install 任何东西
 - 职责：替网页前端向 adsb.lol 要实时航班数据，解决浏览器跨域拦截；
   顺手做 8 秒缓存和按 IP 限流，避免把上游免费接口打爆
-- 前端页面（https://hlmdf.github.io/tools/air-radar/）通过 HTTPS 跨域调用本服务
+- 前端页面（https://hlmdf.github.io/air-radar/）通过 HTTPS 跨域调用本服务
 
 接口：
   GET /api/aircraft?lat=30.6&lon=114.3&r=150
       lat/lon 是视野中心经纬度，r 是查询半径（海里，10~250）
+      【2026-10-28 修改】lat/lon 支持逗号分隔的多个中心点（最多 4 个），
+      服务端逐点查询后按 hex 去重合并，用于缩小地图时覆盖更大范围
       返回 {"ac":[...],"total":n,"now":毫秒时间戳}，ac 里只保留前端需要的字段
   GET /api/photo?hex=780c25
       【2026-10-28 新增】按飞机 hex 查实拍照片（上游 planespotters.net），
@@ -30,12 +32,21 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# 上游：adsb.lol 的 readsb v2 接口，免费公开、无需密钥
-UPSTREAM = "https://api.adsb.lol/v2/point/{lat:.4f}/{lon:.4f}/{r:d}"
+# 上游：adsb.lol 为主，adsb.fi 为备用（两个免费公开接口，无需密钥）
+# 【2026-10-28 修改】改为双源 + 多点合并：
+#   1. 两个源实测数据几乎一致（武汉 463km：32 vs 31，合并 33），互为兜底而非简单叠加
+#   2. 上游限流很严格（5 个并行请求只成功 2 个），所以所有请求串行、间隔 >= 1 秒
+#   3. 前端可一次传多个中心点（缩小地图看大范围时用），服务端逐点查询后按 hex 合并
+UPSTREAM_PRIMARY = "https://api.adsb.lol/v2/point/{lat:.4f}/{lon:.4f}/{r:d}"
+UPSTREAM_FALLBACK = "https://opendata.adsb.fi/api/v2/lat/{lat:.4f}/lon/{lon:.4f}/dist/{r:d}"
 UPSTREAM_TIMEOUT = 8  # 秒
-# 【2026-10-28 修改】5 秒缓存，跟前端 6 秒刷新节奏对齐；
+# 相邻两次上游请求至少间隔多少秒（上游 1 req/s 量级的限流）
+UPSTREAM_MIN_GAP = 1.1
+# 【2026-10-28 修改】缓存 8 秒，跟前端 8 秒刷新节奏对齐；
 # 同一查询网格内多个访客共享一份缓存，避免把上游免费接口打爆
-CACHE_TTL_SECONDS = 5
+CACHE_TTL_SECONDS = 8
+# 上游限流/超时时，最多返回多少秒以内的旧数据（宁可显示旧一点也别空屏）
+STALE_TTL_SECONDS = 90
 # 缓存按 0.25° 经纬网格聚合，附近视野共享一份结果
 GRID = 0.25
 # 每个 IP 每分钟最多请求多少次（防个别用户刷接口）
@@ -51,10 +62,16 @@ PHOTO_UPSTREAM = "https://api.planespotters.net/pub/photos/hex/{hex}"
 PHOTO_CACHE_TTL_SECONDS = 3600  # 照片不常变，缓存 1 小时
 
 cache_lock = threading.Lock()
-cache = {}  # key: (lat_grid, lon_grid, r) -> (时间戳, 响应体)
+cache = {}  # key: (lat_grid, lon_grid, r) -> (时间戳, 飞机列表)
 photo_cache = {}  # key: hex -> (时间戳, 响应体)
 rate_lock = threading.Lock()
 rate_table = {}  # key: ip -> [窗口起点, 次数]
+# 【2026-10-28 新增】上游串行节流：保证两次请求之间有最小间隔，避免触发上游限流
+upstream_lock = threading.Lock()
+upstream_last_at = [0.0]
+
+# 一次请求最多查几个中心点（前端缩小地图时用 4 个点拼出更大覆盖）
+MAX_POINTS = 4
 
 
 def cache_key(lat, lon, r):
@@ -77,8 +94,29 @@ def rate_ok(ip):
         return entry[1] <= RATE_LIMIT_PER_MINUTE
 
 
-def fetch_upstream(lat, lon, r):
-    """向上游要数据并瘦身，带 8 秒网格缓存。失败抛异常。"""
+def _upstream_get(url, ua):
+    """带全局节流的上游 GET，返回解析后的 JSON；失败抛异常"""
+    with upstream_lock:
+        wait = UPSTREAM_MIN_GAP - (time.time() - upstream_last_at[0])
+        if wait > 0:
+            time.sleep(wait)
+        upstream_last_at[0] = time.time()
+        req = urllib.request.Request(url, headers={"User-Agent": ua})
+        with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+
+def _slim(acs):
+    return [{k: ac[k] for k in KEEP_FIELDS if k in ac} for ac in acs]
+
+
+def fetch_point(lat, lon, r):
+    """查一个中心点，返回瘦身后的飞机列表。
+
+    【2026-10-28 修改】双源兜底 + 旧数据兜底：
+      - 先问 adsb.lol；被限流/出错再问 adsb.fi（两个源实测基本是同一批飞机）
+      - 两个源都失败时，返回 90 秒内的旧缓存，避免地图突然清空
+    """
     key = cache_key(lat, lon, r)
     now = time.time()
     with cache_lock:
@@ -86,22 +124,53 @@ def fetch_upstream(lat, lon, r):
         if hit and now - hit[0] < CACHE_TTL_SECONDS:
             return hit[1]
 
-    url = UPSTREAM.format(lat=lat, lon=lon, r=r)
-    req = urllib.request.Request(url, headers={"User-Agent": "hlmdf-air-radar/1.0"})
-    with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    acs = None
+    ua = "hlmdf-air-radar/1.0 (+https://hlmdf.github.io)"
+    for url in (
+        UPSTREAM_PRIMARY.format(lat=lat, lon=lon, r=r),
+        UPSTREAM_FALLBACK.format(lat=lat, lon=lon, r=r),
+    ):
+        try:
+            data = _upstream_get(url, ua)
+            # adsb.lol 用 ac，adsb.fi 用 aircraft
+            acs = data.get("ac") if isinstance(data.get("ac"), list) else data.get("aircraft")
+            if acs is not None:
+                break
+        except Exception:
+            continue
 
-    acs = data.get("ac") or []
-    slim = [{k: ac[k] for k in KEEP_FIELDS if k in ac} for ac in acs]
-    body = {"ac": slim, "total": len(slim), "now": int(now * 1000)}
+    if acs is None:
+        with cache_lock:
+            hit = cache.get(key)
+        if hit and now - hit[0] < STALE_TTL_SECONDS:
+            return hit[1]
+        raise RuntimeError("upstream unavailable")
 
+    slim = _slim(acs)
     with cache_lock:
-        cache[key] = (now, body)
+        cache[key] = (now, slim)
         # 缓存表也别无限涨，超过 500 格就把最旧的一半扔掉
         if len(cache) > 500:
             for k in sorted(cache, key=lambda k: cache[k][0])[: len(cache) // 2]:
                 del cache[k]
-    return body
+    return slim
+
+
+def fetch_area(points, r):
+    """【2026-10-28 新增】查询多个中心点并去重合并。
+
+    前端把视野切成最多 4 个点（缩小地图看大范围时），这里逐点串行查询
+    （上游限流只允许 1 req/s 量级），任一点失败就跳过，不影响其它点。
+    """
+    merged = {}
+    for lat, lon in points[:MAX_POINTS]:
+        try:
+            for ac in fetch_point(lat, lon, r):
+                merged[ac.get("hex") or ""] = ac
+        except Exception:
+            continue
+    merged.pop("", None)
+    return {"ac": list(merged.values()), "total": len(merged), "now": int(time.time() * 1000)}
 
 
 def fetch_photo(hexcode):
@@ -214,23 +283,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
             return
 
+        # 【2026-10-28 修改】lat/lon 支持逗号分隔的多个中心点，例如
+        #   /api/aircraft?lat=30.6,29.2&lon=114.3,113.1&r=250
+        # 前端缩小地图看大范围时会传最多 4 个点，服务端逐点查询后合并去重
         try:
-            lat = float(params.get("lat", [""])[0])
-            lon = float(params.get("lon", [""])[0])
+            lats = [float(v) for v in params.get("lat", [""])[0].split(",") if v.strip()]
+            lons = [float(v) for v in params.get("lon", [""])[0].split(",") if v.strip()]
             r = int(float(params.get("r", [""])[0]))
         except (TypeError, ValueError):
             self._send_json({"error": "bad lat/lon/r"}, 400)
             return
 
-        if not valid_coord(lat, lon) or not MIN_RADIUS_NM <= r <= MAX_RADIUS_NM:
+        if not lats or len(lats) != len(lons):
+            self._send_json({"error": "bad lat/lon/r"}, 400)
+            return
+
+        points = list(zip(lats, lons))[:MAX_POINTS]
+        for lat, lon in points:
+            if not valid_coord(lat, lon):
+                self._send_json({"error": "lat/lon out of range"}, 400)
+                return
+
+        if not MIN_RADIUS_NM <= r <= MAX_RADIUS_NM:
             self._send_json(
-                {"error": "lat/lon out of range or r not in %d..%d" % (MIN_RADIUS_NM, MAX_RADIUS_NM)},
+                {"error": "r not in %d..%d" % (MIN_RADIUS_NM, MAX_RADIUS_NM)},
                 400,
             )
             return
 
         try:
-            self._send_json(fetch_upstream(lat, lon, r))
+            self._send_json(fetch_area(points, r))
         except Exception:
             self._send_json({"error": "upstream unavailable"}, 502)
 
