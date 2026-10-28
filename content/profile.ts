@@ -391,6 +391,11 @@ export const profile = {
       name: { zh: "我的片单", en: "Movies" },
       href: "/movies/",
     },
+    // 【2026-10-28 新增】飞机雷达（站内页面，本页直接跳转）
+    {
+      name: { zh: "飞机雷达", en: "Flight radar" },
+      href: "/tools/air-radar/",
+    },
   ] as PersonalTool[],
   sites: [
     {
