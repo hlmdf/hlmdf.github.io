@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>飞机雷达 - 实时航班查看</title>
+<!-- 【2026-10-28 新增】独立页面：不属于主页站点的任何路由，带自己的导航栏和样式，
+     从个人工具页点链接新标签打开。数据和地图逻辑与主页完全解耦。 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: rgba(18, 18, 26, 0.86);
+    --border: rgba(255, 255, 255, 0.12);
+    --text: #e6e8ee;
+    --muted: #9aa3b2;
+    --accent: #4c8dff;
+  }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  /* 地图铺满整屏，界面元素浮在上面 */
+  #map { position: absolute; inset: 0; background: #0f1118; }
+
+  /* 顶部浮动条 */
+  .bar {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 18px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    white-space: nowrap;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .brand svg { width: 18px; height: 18px; fill: var(--accent); }
+
+  .stat {
+    font-size: 13px;
+    color: var(--muted);
+    padding-left: 18px;
+    border-left: 1px solid var(--border);
+  }
+
+  .stat strong { color: var(--text); font-weight: 600; }
+
+  .refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--text);
+    background: rgba(76, 141, 255, 0.16);
+    border: 1px solid rgba(76, 141, 255, 0.4);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .refresh:hover { background: rgba(76, 141, 255, 0.28); }
+  .refresh:disabled { opacity: 0.45; cursor: default; }
+  .refresh svg { width: 13px; height: 13px; fill: currentColor; }
+  .refresh.spinning svg { animation: spin 0.9s linear infinite; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 左下角提示 */
+  .hint {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    z-index: 1000;
+    max-width: 340px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  .hint a { color: var(--accent); }
+
+  .hint.error { color: #ff9a9a; border-color: rgba(255, 120, 120, 0.4); }
+
+  /* 飞机图标容器，避免 Leaflet 默认方块背景 */
+  .air-radar-plane { background: none; border: none; }
+
+  /* 弹窗改深色，跟页面统一 */
+  .leaflet-popup-content-wrapper {
+    background: #14141d;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+  }
+
+  .leaflet-popup-content { margin: 12px 14px; width: 260px !important; }
+  .leaflet-popup-tip { background: #14141d; border: 1px solid var(--border); }
+  .leaflet-popup-close-button { color: var(--muted) !important; }
+  .leaflet-container { background: #0f1118; font-family: inherit; }
+  .leaflet-control-attribution {
+    background: rgba(10, 10, 15, 0.7) !important;
+    color: var(--muted) !important;
+    font-size: 11px;
+  }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+
+  @media (max-width: 720px) {
+    .bar {
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      transform: none;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 14px;
+      flex-wrap: wrap;
+      white-space: normal;
+    }
+    .brand { font-size: 14px; }
+    .stat { padding-left: 10px; font-size: 12px; }
+    .hint { left: 10px; right: 10px; bottom: 10px; max-width: none; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="bar">
+  <span class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.6c.5 0 .9.3 1.1.9l.9 3.2c.1.6.2 1.5.2 2.3v1.9l6.9 4.1c.4.2.6.5.6 1v1.4c0 .4-.4.6-.8.4l-7.3-2.6v3.2l2.1 1.6c.2.2.4.5.4.8v1c0 .4-.4.6-.7.4l-3.4-1-3.4 1c-.3.2-.7 0-.7-.4v-1c0-.3.2-.6.4-.8l2.1-1.6v-3.2l-7.3 2.6c-.4.2-.8 0-.8-.4v-1.4c0-.5.2-.8.6-1l6.9-4.1V8c0-.8.1-1.7.2-2.3l.9-3.2c.2-.6.6-.9 1.1-.9z"/></svg>
+    飞机雷达
+  </span>
+  <span class="stat"><strong id="count">0</strong> 架在视野内</span>
+  <span class="stat"><span id="radius">—</span></span>
+  <span class="stat">更新 <span id="time">—</span></span>
+  <button class="refresh" id="refresh" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+    刷新
+  </button>
+</div>
+
+<div class="hint" id="hint">
+  拖动或缩放地图会重新查询当前视野。数据来自
+  <a href="https://adsb.lol/" target="_blank" rel="noreferrer">adsb.lol</a>
+  的公开 ADS-B 接收网络，位置有数秒到数十秒延迟。点飞机看详情和实拍照片。
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* 转发服务地址（tools/air-radar/server.py，跑在阿里云上） */
+  var API = "https://47.103.222.155:5011";
+
+  /* 默认视野：武汉上空 */
+  var DEFAULT_CENTER = [30.6, 114.3];
+  var DEFAULT_ZOOM = 7;
+  /* 6 秒拉一次新数据；间隙按航向 + 地速推算位置，飞机平滑滑行 */
+  var REFRESH_MS = 6000;
+  var TICK_MS = 500;
+  /* 飞出查询范围的飞机多留一会儿，避免边缘闪烁 */
+  var STALE_MS = 30000;
+
+  var countEl = document.getElementById("count");
+  var radiusEl = document.getElementById("radius");
+  var timeEl = document.getElementById("time");
+  var refreshBtn = document.getElementById("refresh");
+  var hintEl = document.getElementById("hint");
+  var hintDefault = hintEl.innerHTML;
+
+  /* 半径随缩放级别变大，250 海里是上游接口的硬上限 */
+  function radiusForZoom(zoom) {
+    if (zoom >= 10) return 80;
+    if (zoom === 9) return 120;
+    if (zoom === 8) return 180;
+    return 250;
+  }
+
+  var map = L.map("map", {
+    center: DEFAULT_CENTER,
+    zoom: DEFAULT_ZOOM,
+    minZoom: 3,
+    maxZoom: 16,
+    scrollWheelZoom: true,
+    worldCopyJump: true
+  });
+
+  L.tileLayer(
+    "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}",
+    { subdomains: "1234", maxZoom: 18, attribution: "© 高德地图 | 航班数据 © adsb.lol" }
+  ).addTo(map);
+
+  /* 虚线圈 = 当前查询覆盖范围 */
+  var coverageCircle = L.circle(DEFAULT_CENTER, {
+    radius: radiusForZoom(DEFAULT_ZOOM) * 1852,
+    color: "#4c8dff",
+    weight: 1,
+    opacity: 0.5,
+    dashArray: "4 4",
+    fillColor: "#4c8dff",
+    fillOpacity: 0.04
+  }).addTo(map);
+
+  /* 已画在图上的飞机：hex -> {marker, lat, lon, track, gs, onGround, baseAt, seenAt} */
+  var planes = new Map();
+  /* 照片缓存：查过的飞机不重复请求；null 表示查过但没有照片 */
+  var photoCache = new Map();
+  var fetching = false;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function planeIcon(track, onGround) {
+    var color = onGround ? "#8b93a5" : "#4c8dff";
+    return L.divIcon({
+      className: "air-radar-plane",
+      html:
+        '<svg viewBox="0 0 24 24" width="22" height="22" style="display:block;transform:rotate(' +
+        Math.round(track) +
+        'deg);filter:drop-shadow(0 0 2px rgba(0,0,0,.65))">' +
+        '<path fill="' + color + '" stroke="#fff" stroke-width="0.8" d="M12 1.6c.5 0 .9.3 1.1.9l.9 3.2c.1.6.2 1.5.2 2.3v1.9l6.9 4.1c.4.2.6.5.6 1v1.4c0 .4-.4.6-.8.4l-7.3-2.6v3.2l2.1 1.6c.2.2.4.5.4.8v1c0 .4-.4.6-.7.4l-3.4-1-3.4 1c-.3.2-.7 0-.7-.4v-1c0-.3.2-.6.4-.8l2.1-1.6v-3.2l-7.3 2.6c-.4.2-.8 0-.8-.4v-1.4c0-.5.2-.8.6-1l6.9-4.1V8c0-.8.1-1.7.2-2.3l.9-3.2c.2-.6.6-.9 1.1-.9z"/></svg>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11]
+    });
+  }
+
+  function popupHtml(ac) {
+    var rows = [
+      ["机型", ac.t || "—"],
+      ["注册号", ac.r || "—"],
+      ["高度", ac.alt_baro === "ground" ? "地面" : (typeof ac.alt_baro === "number" ? ac.alt_baro.toLocaleString() + " ft" : "—")],
+      ["速度", typeof ac.gs === "number" ? Math.round(ac.gs) + " kt" : "—"],
+      ["航向", typeof ac.track === "number" ? Math.round(ac.track) + "°" : "—"],
+      ["垂直速度", typeof ac.baro_rate === "number"
+        ? (ac.baro_rate > 0 ? "↑" : ac.baro_rate < 0 ? "↓" : "") + Math.abs(ac.baro_rate) + " ft/min"
+        : "—"],
+      ["应答机", ac.squawk || "—"]
+    ];
+
+    var body = rows.map(function (row) {
+      return '<div style="display:flex;justify-content:space-between;gap:12px">' +
+        '<span style="color:#9aa3b2">' + row[0] + "</span><span>" + esc(row[1]) + "</span></div>";
+    }).join("");
+
+    var title = esc(String(ac.flight || "").trim() || ac.hex);
+    return '<div style="font-size:13px;line-height:1.7">' +
+      '<div style="font-weight:600;font-size:14px;margin-bottom:2px">' + title + "</div>" +
+      '<div id="ph-' + esc(ac.hex) + '" style="margin:8px 0;color:#9aa3b2">照片加载中…</div>' +
+      body + "</div>";
+  }
+
+  function renderPhoto(hex, photo) {
+    var box = document.getElementById("ph-" + hex);
+    if (!box) return;
+    if (!photo) {
+      box.textContent = "暂无实拍照片";
+      return;
+    }
+    box.innerHTML =
+      '<a href="' + esc(photo.link) + '" target="_blank" rel="noreferrer">' +
+      '<img src="' + esc(photo.src) + '" alt="" style="width:100%;border-radius:6px;display:block"/></a>' +
+      '<div style="font-size:11px;color:#9aa3b2;margin-top:3px">© ' + esc(photo.photographer) + " / planespotters.net</div>";
+  }
+
+  function loadPhoto(hex) {
+    if (photoCache.has(hex)) {
+      renderPhoto(hex, photoCache.get(hex));
+      return;
+    }
+    fetch(API + "/api/photo?hex=" + encodeURIComponent(hex), { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("photo api " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var photo = data && data.photo && data.photo.src ? data.photo : null;
+        photoCache.set(hex, photo);
+        renderPhoto(hex, photo);
+      })
+      .catch(function () {
+        photoCache.set(hex, null);
+        renderPhoto(hex, null);
+      });
+  }
+
+  /* 航迹推算：按航向和地速把飞机往前挪，画面上持续滑行 */
+  function interpolate() {
+    var now = Date.now();
+    planes.forEach(function (p) {
+      if (p.onGround || p.gs < 30) return;
+      var dtHours = (now - p.baseAt) / 3600000;
+      if (dtHours <= 0) return;
+      var distNm = p.gs * dtHours;
+      var rad = (p.track * Math.PI) / 180;
+      var dLat = (distNm * Math.cos(rad)) / 60;
+      var cosLat = Math.cos((p.lat * Math.PI) / 180);
+      var dLon = Math.abs(cosLat) < 1e-6 ? 0 : (distNm * Math.sin(rad)) / (60 * cosLat);
+      p.marker.setLatLng([p.lat + dLat, p.lon + dLon]);
+    });
+  }
+
+  function refresh() {
+    if (fetching) return;
+    fetching = true;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("spinning");
+
+    var center = map.getCenter();
+    var radius = radiusForZoom(map.getZoom());
+    coverageCircle.setLatLng([center.lat, center.lng]).setRadius(radius * 1852);
+    radiusEl.textContent = "覆盖半径约 " + Math.round(radius * 1.852) + " 公里";
+
+    var url = API + "/api/aircraft?lat=" + center.lat.toFixed(4) +
+      "&lon=" + center.lng.toFixed(4) + "&r=" + radius;
+
+    fetch(url, { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("radar api " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var list = (data && data.ac) || [];
+        var now = Date.now();
+        var shown = 0;
+
+        list.forEach(function (ac) {
+          if (typeof ac.lat !== "number" || typeof ac.lon !== "number" || !ac.hex) return;
+          shown += 1;
+          var onGround = ac.alt_baro === "ground";
+          var existing = planes.get(ac.hex);
+
+          if (existing) {
+            existing.lat = ac.lat;
+            existing.lon = ac.lon;
+            existing.track = ac.track || 0;
+            existing.gs = typeof ac.gs === "number" ? ac.gs : 0;
+            existing.onGround = onGround;
+            existing.baseAt = now;
+            existing.seenAt = now;
+            existing.marker.setLatLng([ac.lat, ac.lon]);
+            existing.marker.setIcon(planeIcon(ac.track || 0, onGround));
+            existing.marker.setPopupContent(popupHtml(ac));
+            /* 弹窗内容被重置回"加载中"，若照片已缓存就补回去 */
+            if (photoCache.has(ac.hex)) renderPhoto(ac.hex, photoCache.get(ac.hex));
+          } else {
+            var marker = L.marker([ac.lat, ac.lon], { icon: planeIcon(ac.track || 0, onGround) })
+              .addTo(map)
+              .bindPopup(popupHtml(ac));
+            marker.on("popupopen", function () { loadPhoto(ac.hex); });
+            planes.set(ac.hex, {
+              marker: marker,
+              lat: ac.lat,
+              lon: ac.lon,
+              track: ac.track || 0,
+              gs: typeof ac.gs === "number" ? ac.gs : 0,
+              onGround: onGround,
+              baseAt: now,
+              seenAt: now
+            });
+          }
+        });
+
+        /* 消失超过 30 秒的飞机移除 */
+        planes.forEach(function (p, hex) {
+          if (now - p.seenAt > STALE_MS) {
+            map.removeLayer(p.marker);
+            planes.delete(hex);
+          }
+        });
+
+        countEl.textContent = shown;
+        timeEl.textContent = new Date(now).toLocaleTimeString("zh-CN", { hour12: false });
+        hintEl.className = "hint";
+        hintEl.innerHTML = hintDefault;
+      })
+      .catch(function () {
+        hintEl.className = "hint error";
+        hintEl.textContent = "数据接口暂时不可用，稍后会自动重试。";
+      })
+      .then(function () {
+        fetching = false;
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove("spinning");
+      });
+  }
+
+  refreshBtn.addEventListener("click", refresh);
+  map.on("moveend", refresh);
+
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+  setInterval(interpolate, TICK_MS);
+  setTimeout(function () { map.invalidateSize(); }, 150);
+})();
+</script>
+</body>
+</html>
