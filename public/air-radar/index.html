@@ -278,6 +278,8 @@
   var planes = new Map();
   /* 照片缓存：查过的飞机不重复请求；null 表示查过但没有照片 */
   var photoCache = new Map();
+  /* 【2026-10-28 新增】航路缓存：key 航班号；null 表示查过但没有航路 */
+  var routeCache = new Map();
   var fetching = false;
 
   function esc(s) {
@@ -322,7 +324,51 @@
     return '<div style="font-size:13px;line-height:1.7">' +
       '<div style="font-weight:600;font-size:14px;margin-bottom:2px">' + title + "</div>" +
       '<div id="ph-' + esc(ac.hex) + '" style="margin:8px 0;color:#9aa3b2">照片加载中…</div>' +
+      /* 【2026-10-28 新增】起降机场占位，弹窗打开后由 loadRoute() 填 */
+      '<div id="rt-' + esc(ac.hex) + '" style="margin:0 0 8px;color:#9aa3b2">航路加载中…</div>' +
       body + "</div>";
+  }
+
+  /* 【2026-10-28 新增】把起降机场填进弹窗 */
+  function renderRoute(hex, route) {
+    var box = document.getElementById("rt-" + hex);
+    if (!box) return;
+    if (!route || !route.origin || !route.destination) {
+      box.textContent = "暂无航路信息";
+      return;
+    }
+    box.style.color = "#e6e8ee";
+    box.innerHTML =
+      '<span style="color:#9aa3b2">起飞</span> ' +
+      esc(route.origin.name + (route.origin.code ? " (" + route.origin.code + ")" : "")) +
+      ' <span style="color:#4c8dff">→</span> ' +
+      '<span style="color:#9aa3b2">降落</span> ' +
+      esc(route.destination.name + (route.destination.code ? " (" + route.destination.code + ")" : ""));
+  }
+
+  function loadRoute(hex, callsign) {
+    if (!callsign) {
+      renderRoute(hex, null);
+      return;
+    }
+    if (routeCache.has(callsign)) {
+      renderRoute(hex, routeCache.get(callsign));
+      return;
+    }
+    fetch(API + "/api/route?callsign=" + encodeURIComponent(callsign), { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("route api " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var route = (data && data.route) || null;
+        routeCache.set(callsign, route);
+        renderRoute(hex, route);
+      })
+      .catch(function () {
+        routeCache.set(callsign, null);
+        renderRoute(hex, null);
+      });
   }
 
   function renderPhoto(hex, photo) {
@@ -436,13 +482,21 @@
             existing.marker.setLatLng([ac.lat, ac.lon]);
             existing.marker.setIcon(planeIcon(ac.track || 0, onGround));
             existing.marker.setPopupContent(popupHtml(ac));
-            /* 弹窗内容被重置回"加载中"，若照片已缓存就补回去 */
+            /* 弹窗内容被重置回"加载中"，若照片/航路已缓存就补回去 */
             if (photoCache.has(ac.hex)) renderPhoto(ac.hex, photoCache.get(ac.hex));
+            var cachedRouteKey = String(ac.flight || "").trim();
+            if (cachedRouteKey && routeCache.has(cachedRouteKey)) {
+              renderRoute(ac.hex, routeCache.get(cachedRouteKey));
+            }
           } else {
             var marker = L.marker([ac.lat, ac.lon], { icon: planeIcon(ac.track || 0, onGround) })
               .addTo(map)
               .bindPopup(popupHtml(ac));
-            marker.on("popupopen", function () { loadPhoto(ac.hex); });
+            marker.on("popupopen", function () {
+              loadPhoto(ac.hex);
+              /* 【2026-10-28 新增】顺带查起降机场 */
+              loadRoute(ac.hex, String(ac.flight || "").trim());
+            });
             planes.set(ac.hex, {
               marker: marker,
               lat: ac.lat,

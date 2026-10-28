@@ -17,6 +17,9 @@
   GET /api/photo?hex=780c25
       【2026-10-28 新增】按飞机 hex 查实拍照片（上游 planespotters.net），
       返回 {"photo":{"src":缩略图,"link":原图页,"photographer":作者}} 或 {"photo":null}
+  GET /api/route?callsign=CES2067
+      【2026-10-28 新增】按航班号查起降机场（上游 adsbdb.com），
+      返回 {"route":{"origin":{"code","name"},"destination":{...}}} 或 {"route":null}
 
 服务器上用 deploy/install.sh 安装：Nginx 在 5011 提供 HTTPS，本进程只监听 127.0.0.1:8011。
 本地试跑：
@@ -61,9 +64,16 @@ KEEP_FIELDS = ("hex", "flight", "lat", "lon", "alt_baro", "gs", "track", "t", "r
 PHOTO_UPSTREAM = "https://api.planespotters.net/pub/photos/hex/{hex}"
 PHOTO_CACHE_TTL_SECONDS = 3600  # 照片不常变，缓存 1 小时
 
+# 【2026-10-28 新增】航路查询上游：adsbdb.com，按航班号返回起降机场，免密钥
+# 航路基本不变，缓存 24 小时
+ROUTE_UPSTREAM = "https://api.adsbdb.com/v0/callsign/{callsign}"
+ROUTE_CACHE_TTL_SECONDS = 86400
+
 cache_lock = threading.Lock()
 cache = {}  # key: (lat_grid, lon_grid, r) -> (时间戳, 飞机列表)
 photo_cache = {}  # key: hex -> (时间戳, 响应体)
+# 【2026-10-28 新增】航路缓存：key 航班号 -> (时间戳, 响应体)
+route_cache = {}
 rate_lock = threading.Lock()
 rate_table = {}  # key: ip -> [窗口起点, 次数]
 # 【2026-10-28 新增】上游串行节流：保证两次请求之间有最小间隔，避免触发上游限流
@@ -210,6 +220,46 @@ def fetch_photo(hexcode):
     return body
 
 
+def fetch_route(callsign):
+    """【2026-10-28 新增】按航班号查起降机场，带 24 小时缓存。
+
+    返回 {"route": {"origin": {"code","name"}, "destination": {"code","name"}}}；
+    查不到（常见于小众/货运航班）返回 {"route": None}。
+    """
+    now = time.time()
+    with cache_lock:
+        hit = route_cache.get(callsign)
+        if hit and now - hit[0] < ROUTE_CACHE_TTL_SECONDS:
+            return hit[1]
+
+    route = None
+    try:
+        url = ROUTE_UPSTREAM.format(callsign=urllib.parse.quote(callsign))
+        req = urllib.request.Request(url, headers={"User-Agent": "hlmdf-air-radar/1.0 (+https://hlmdf.github.io)"})
+        with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        fr = (data.get("response") or {}).get("flightroute") or {}
+        origin = fr.get("origin") or {}
+        destination = fr.get("destination") or {}
+        if origin and destination:
+            def pick_airport(a):
+                code = a.get("iata_code") or a.get("icao_code") or ""
+                name = a.get("municipality") or a.get("name") or ""
+                return {"code": code, "name": name}
+
+            route = {"origin": pick_airport(origin), "destination": pick_airport(destination)}
+    except Exception:
+        route = None
+
+    body = {"route": route}
+    with cache_lock:
+        route_cache[callsign] = (now, body)
+        if len(route_cache) > 5000:
+            for k in sorted(route_cache, key=lambda k: route_cache[k][0])[: len(route_cache) // 2]:
+                del route_cache[k]
+    return body
+
+
 def valid_coord(lat, lon):
     if isinstance(lat, bool) or isinstance(lon, bool):
         return False
@@ -277,6 +327,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "bad hex"}, 400)
                 return
             self._send_json(fetch_photo(hexcode))
+            return
+
+        # 【2026-10-28 新增】起降机场（按航班号）
+        if path == "/api/route":
+            callsign = params.get("callsign", [""])[0].strip().upper()
+            if not (2 <= len(callsign) <= 10) or not callsign.isalnum():
+                self._send_json({"error": "bad callsign"}, 400)
+                return
+            self._send_json(fetch_route(callsign))
             return
 
         if path != "/api/aircraft":
