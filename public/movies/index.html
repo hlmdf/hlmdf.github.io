@@ -791,6 +791,7 @@
     .fab { right: 20px; bottom: 108px; }
   }
 </style>
+  <script src="/pinyin-data.js"></script>
 </head>
 <body>
 
@@ -825,6 +826,8 @@
   </div>
   <input class="search" id="searchInput" placeholder="搜索片名 / 导演 / 演员">
 </div>
+
+<p id="searchHint" style="display:none;margin:-2px 0 10px;font-size:12px;color:#8a8f98;"></p>
 
 <div class="filter-row">
   <div class="tabs" id="typeTabs">
@@ -1270,11 +1273,106 @@
     return matchFilters(item);
   }
 
+  function updateSearchHint() {
+    var el = document.getElementById("searchHint");
+    if (!el) return;
+    var hint = aliasHintFor(keyword);
+    el.textContent = hint;
+    el.style.display = hint ? "" : "none";
+  }
+
   // 归一化：去掉空格、间隔号和各种标点，让「汤姆·汉克斯」「汤姆汉克斯」「TOM HANKS」
   // 在比较时等价。豆瓣返回的人名带间隔号，而人输入时很少打它。
+  /* ---------- 拼音与别名 ---------- */
+
+  // 常用字拼音表按「汉字串 + 音节索引」压缩存放，24KB，首次搜索时才展开。
+  var PY_MAP = null;
+  function pinyinMap() {
+    if (PY_MAP) return PY_MAP;
+    PY_MAP = {};
+    var d = window.PINYIN_DATA;
+    if (!d || !d.c) return PY_MAP;
+    var idx = d.i.split(",");
+    for (var k = 0; k < d.c.length; k += 1) {
+      PY_MAP[d.c.charAt(k)] = d.s[parseInt(idx[k], 36)];
+    }
+    return PY_MAP;
+  }
+
+  // 汉字转全拼与首字母；非汉字跳过，英文留在原文里照常匹配。
+  function toPinyin(text) {
+    var map = pinyinMap(), full = "", initials = "";
+    for (var k = 0; k < text.length; k += 1) {
+      var py = map[text.charAt(k)];
+      if (py) { full += py; initials += py.charAt(0); }
+    }
+    return full + " " + initials;
+  }
+
+  // 常见昵称。按「本名 → 昵称」存，命中本名的条目会把昵称也塞进索引，
+  // 所以搜「小李子」能翻出莱昂纳多的片子，而条目里本来没有这三个字。
+  var ALIASES = [
+    ["莱昂纳多·迪卡普里奥", "小李子"],
+    ["斯嘉丽·约翰逊", "寡姐"],
+    ["本尼迪克特·康伯巴奇", "卷福"],
+    ["汤姆·希德勒斯顿", "抖森"],
+    ["小罗伯特·唐尼", "钢铁侠"],
+    ["布拉德·皮特", "皮特"],
+    ["汤姆·克鲁斯", "阿汤哥"],
+    ["艾玛·斯通", "石头姐"],
+    ["詹妮弗·劳伦斯", "大表姐"],
+    ["娜塔莉·波特曼", "波特曼"],
+    ["安东尼·霍普金斯", "霍普金斯"],
+    ["克里斯蒂安·贝尔", "贝尔"],
+    ["马特·达蒙", "马特达蒙"],
+    ["基努·里维斯", "基努"],
+    ["尼古拉斯·凯奇", "凯奇"],
+    ["约翰尼·德普", "德普"],
+    ["威尔·史密斯", "史密斯"],
+    ["阿尔·帕西诺", "帕西诺"],
+    ["罗伯特·德尼罗", "德尼罗"],
+    ["克里斯托弗·诺兰", "诺兰"],
+    ["昆汀·塔伦蒂诺", "昆汀"],
+    ["马丁·斯科塞斯", "斯科塞斯"],
+    ["大卫·芬奇", "芬奇"],
+    ["宫崎骏", "宫崎俊"]
+  ];
+
+  function aliasText(raw) {
+    var out = "";
+    for (var k = 0; k < ALIASES.length; k += 1) {
+      if (raw.indexOf(ALIASES[k][0]) !== -1) out += " " + ALIASES[k][1];
+    }
+    return out;
+  }
+
+  function aliasHintFor(query) {
+    var n = normText(query);
+    if (!n) return "";
+    for (var k = 0; k < ALIASES.length; k += 1) {
+      if (normText(ALIASES[k][1]) === n) {
+        return "「" + ALIASES[k][1] + "」按别名匹配 " + ALIASES[k][0];
+      }
+    }
+    return "";
+  }
+
   function normText(text) {
     return String(text || "").toLowerCase()
       .replace(/[\s·・•.\-_/\\,，、;；:：()（）\[\]【】"'“”‘’]+/g, "");
+  }
+
+  function searchHay(item) {
+    if (item._hay) return item._hay;
+    var raw = [item.title, item.titleEn, item.director,
+      (item.actors || []).join(" "),
+      (item.genres || []).join(" "),
+      (item.regions || []).join(" ")].join(" ");
+    // 原文 + 拼音（全拼与首字母）+ 别名昵称，三段拼一起，查询时统一做子串比较。
+    // 别名的拼音也要算进去，否则搜「xiaolizi」找不到。
+    var alias = aliasText(raw);
+    item._hay = normText(raw) + " | " + toPinyin(raw + " " + alias) + " | " + normText(alias);
+    return item._hay;
   }
 
   function matchFilters(item) {
@@ -1293,13 +1391,7 @@
       }
     }
     if (keyword) {
-      var hay = normText([
-        item.title, item.titleEn, item.director,
-        (item.actors || []).join(" "),
-        (item.genres || []).join(" "),
-        (item.regions || []).join(" ")
-      ].join(" "));
-      // 空格分词，每个词都要命中，所以「诺兰 星际」能搜到《星际穿越》。
+      var hay = searchHay(item);
       var terms = keyword.split(/\s+/);
       for (var t = 0; t < terms.length; t += 1) {
         var term = normText(terms[t]);
@@ -2948,6 +3040,7 @@
 
   document.getElementById("searchInput").addEventListener("input", function () {
     keyword = this.value.trim().toLowerCase();
+    updateSearchHint();
     curPage = 1;
     render();
   });

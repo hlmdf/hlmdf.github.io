@@ -427,6 +427,12 @@ def fetch_book(subject_id):
         "publishers": press_out,
         "year": int(match.group(0)) if match else "",
         "intro": re.sub(r"\s+", " ", str(data.get("intro") or "")).strip(),
+        # 豆瓣读书没有电影那样的类型字段，详情里的 tags 是唯一的分类来源，
+        # 而且只有带登录态时才偶尔给值，所以拿不到就留空。
+        "genres": [
+            str(tag.get("name")) for tag in (data.get("tags") or [])[:6]
+            if isinstance(tag, dict) and tag.get("name")
+        ],
     }
 
 def enrich_book(book):
@@ -452,6 +458,8 @@ def enrich_book(book):
         book["translator"] = info["translator"]
     if not book.get("publishers") and info["publishers"]:
         book["publishers"] = info["publishers"]
+    if not book.get("genres") and info.get("genres"):
+        book["genres"] = info["genres"]
     if book.get("year") in ("", None) and info["year"] != "":
         book["year"] = info["year"]
     return book
