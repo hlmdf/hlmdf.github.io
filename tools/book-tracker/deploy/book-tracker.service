@@ -1,0 +1,23 @@
+[Unit]
+Description=Private book list
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=book-tracker
+Group=book-tracker
+WorkingDirectory=/opt/book-tracker
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/book-tracker/server.py 8003
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/book-tracker
+
+[Install]
+WantedBy=multi-user.target

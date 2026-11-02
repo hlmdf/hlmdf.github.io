@@ -24,6 +24,23 @@ BOOK_PASSWORD=你的管理密码 python server.py
 
 三个都不进 Git，也不该进部署包。
 
+## 部署到阿里云
+
+`deploy/` 下是同款流程，双击 `deploy-book.cmd`：
+
+1. 本地打 zip → `scp` 上传 → 服务器解压后跑 `install-book.sh`
+2. 中途输两次密码：服务器 root 密码、书单管理密码
+
+`install-book.sh` 只做这些，不碰其他服务：
+
+- 建系统用户 `book-tracker` 和目录 `/opt/book-tracker`
+- 装 `server.py`，首次生成 `config.json`（密码哈希，权限 0600）
+- 注册 `book-tracker.service`，跑在 `127.0.0.1:8003`
+- 加 Nginx 站点，HTTPS `5004` → `8003`，复用现有 `/etc/nginx/ssl/ip.*` 证书
+- 端口冲突、Nginx 校验失败都会中止并回滚
+
+数据是 `/opt/book-tracker/books.json`，和片单的 `movies.json` 两份文件，互不影响。重复运行只会替换代码，不会碰数据。
+
 ## 和片单不一样的地方
 
 - 状态是 **读过 / 在读 / 想读**，没有「电影 / 电视剧」这种分类维度

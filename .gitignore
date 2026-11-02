@@ -53,6 +53,7 @@ yarn-error.log*
 /tools/book-tracker/douban_pending.json
 /tools/book-tracker/__pycache__/
 /tools/book-tracker/config.json.tmp
+/tools/book-tracker/deploy/*.zip
 
 # FileDrop runtime data is kept on the server.
 /tools/filedrop/node_modules/
