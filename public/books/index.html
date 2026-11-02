@@ -2614,7 +2614,8 @@
       return api("/api/books/refresh", { method: "POST", body: { cursor: cursor } }).then(function (res) {
         applyList(res);
         totalFilled += res.filled || 0;
-        if (res.done) {
+        // 旧版后端不返回 nextCursor，这里兜一下，避免无限循环。
+        if (res.done || typeof res.nextCursor !== "number") {
           saving = false;
           btn.disabled = false;
           btn.textContent = "更新";
