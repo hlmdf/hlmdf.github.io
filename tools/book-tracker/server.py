@@ -927,7 +927,36 @@ def douban_error_text(data):
     return "豆瓣没有登录成功"
 
 
+def parse_pub(text):
+    """<div class="pub"> 的格式：作者 / 译者 / 出版社 / 年份 / 价格。
+
+    译者和价格都可能没有，所以以「含年份的那一段」为锚点往前推，
+    比按固定下标取更稳。
+    """
+    parts = [part.strip() for part in str(text or "").split("/") if part.strip()]
+    year_index = -1
+    for index, part in enumerate(parts):
+        if re.search(r"(?:19|20)\d{2}", part):
+            year_index = index
+            break
+    if year_index < 0:
+        return "", "", "", ""
+    year_match = re.search(r"(?:19|20)\d{2}", parts[year_index])
+    return (
+        parts[0] if year_index >= 1 else "",
+        parts[1] if year_index >= 3 else "",
+        parts[year_index - 1] if year_index >= 1 else "",
+        int(year_match.group(0)) if year_match else "",
+    )
+
+
 def parse_collect_html(html_text, start):
+    """解析豆瓣读书的收藏页。
+
+    电影版的收藏页是 <div class="item"> + <em>，读书版完全不同：
+    卡片是 <li class="subject-item">，书名在 <h2><a title="...">，
+    作者/译者/出版社/年份/价格挤在 <div class="pub"> 里，用 / 分隔。
+    """
     total = 0
     shown_end = None
     match = re.search(
@@ -937,36 +966,52 @@ def parse_collect_html(html_text, start):
     if match:
         shown_end = int(match.group(2))
         total = int(match.group(3))
+
     cards = []
-    for part in re.split(r'<div class="item\b', html_text)[1:]:
+    for part in re.split(r'<li class="subject-item"', html_text)[1:]:
         sid_match = re.search(r"/subject/(\d+)/", part)
-        em_match = re.search(r"<em>(.*?)</em>", part, re.S)
-        if not sid_match or not em_match:
+        if not sid_match:
             continue
-        raw_title = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", em_match.group(1)))).strip()
-        bits = [bit.strip() for bit in raw_title.split("/") if bit.strip()]
-        if not bits:
+
+        title = ""
+        title_match = re.search(r'<h2>\s*<a[^>]*?title="([^"]*)"', part, re.S)
+        if title_match:
+            title = html.unescape(title_match.group(1))
+        if not title:
+            link_match = re.search(r"<h2>\s*<a[^>]*>(.*?)</a>", part, re.S)
+            if link_match:
+                title = html.unescape(re.sub(r"<[^>]+>", "", link_match.group(1)))
+        title = re.sub(r"\s+", " ", title).strip()
+        if not title:
             continue
-        intro_match = re.search(r'class="intro">(.*?)</li>', part, re.S)
-        intro = ""
-        if intro_match:
-            intro = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", intro_match.group(1)))).strip()
-        year_match = re.search(r"(?:19|20)\d{2}", intro)
+
         img_match = re.search(r'<img[^>]+src="([^"]+)"', part)
         poster = html.unescape(img_match.group(1)) if img_match else ""
         if poster.startswith("//"):
             poster = "https:" + poster
+
+        pub = ""
+        year = ""
+        pub_match = re.search(r'<div class="pub">(.*?)</div>', part, re.S)
+        if pub_match:
+            pub = html.unescape(re.sub(r"<[^>]+>", " ", pub_match.group(1)))
+            pub = re.sub(r"\s+", " ", pub).strip()
+            year_match = re.search(r"(?:19|20)\d{2}", pub)
+            if year_match:
+                year = int(year_match.group(0))
+
         cards.append({
             "sid": sid_match.group(1),
-            "title": bits[0][:200],
-            "titleEn": bits[1][:200] if len(bits) > 1 else "",
-            "year": int(year_match.group(0)) if year_match else "",
+            "title": title[:200],
+            "titleEn": "",
+            "year": year,
             "poster": poster if poster.startswith("http") else "",
+            "pub": pub,
         })
+
     if shown_end is None:
         shown_end = start + (len(cards) or DOUBAN_GRID_PAGE)
     return cards, total, shown_end
-
 
 def fetch_collect_page(opener, uid, status, start):
     query = urllib.parse.urlencode({
@@ -1002,15 +1047,17 @@ def fetch_collect_page(opener, uid, status, start):
 
 def book_from_card(card, status):
     info = fetch_book(card["sid"]) or {}
+    # 详情接口偶尔会被限流；收藏页的 pub 字段能兜住作者、译者、出版社和年份。
+    pub_author, pub_translator, pub_publisher, pub_year = parse_pub(card.get("pub") or "")
     poster = card["poster"] if str(card.get("poster") or "").startswith("http") else ""
     return clean_book({
         "title": card["title"],
         "titleEn": card.get("titleEn") or "",
-        "year": info.get("year") if info.get("year") not in ("", None) else card.get("year", ""),
+        "year": info.get("year") or card.get("year") or pub_year or "",
         "status": DOUBAN_STATUS.get(status, "read"),
-        "author": info.get("author") or card.get("author") or "",
-        "translator": info.get("translator") or [],
-        "publishers": info.get("publishers") or card.get("publishers") or [],
+        "author": info.get("author") or card.get("author") or pub_author or "",
+        "translator": info.get("translator") or ([pub_translator] if pub_translator else []),
+        "publishers": info.get("publishers") or card.get("publishers") or ([pub_publisher] if pub_publisher else []),
         "genres": info.get("genres") or [],
         "rating": info.get("rating") if info.get("rating") not in ("", None) else "",
         "douban": "https://book.douban.com/subject/%s/" % card["sid"],
