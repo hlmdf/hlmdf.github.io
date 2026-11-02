@@ -435,7 +435,7 @@ def fetch_book(subject_id):
         ],
     }
 
-def enrich_book(book):
+def enrich_book(book, force=False):
     match = SUBJECT_RE.search(book.get("douban") or "")
     if not match:
         return book
@@ -445,7 +445,9 @@ def enrich_book(book):
         or not book.get("publishers")
         or book.get("year") in ("", None)
     )
-    if not needs:
+    # force 用于「全部更新一遍」：即使字段齐全也重新拉一次，
+    # 让豆瓣评分这类会变动的值跟着更新。补写仍然只补空的，不盖手填的内容。
+    if not needs and not force:
         return book
     info = fetch_book(match.group(1))
     if not info:
@@ -1394,55 +1396,63 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_refresh(self):
         if not self.require_auth():
             return
+        try:
+            body = self.read_json(10_000)
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        try:
+            cursor = max(0, int(body.get("cursor") or 0))
+        except (TypeError, ValueError):
+            cursor = 0
+
         with LOCK:
             try:
                 items = load_books()
             except ValueError as exc:
                 return self.send_json({"error": str(exc)}, 500)
+
+        # 只处理带豆瓣链接的条目。游标让「全部更新一遍」能分批跑完，
+        # 每批都从头开始反而会让前 40 条永远占着位置。
+        targets = [book for book in items if SUBJECT_RE.search(book.get("douban") or "")]
+        total = len(targets)
+        batch = 40
         changed = 0
-        attempts = 0
-        more = False
-        for book in items:
-            if not SUBJECT_RE.search(book.get("douban") or ""):
-                continue
-            before = {
-                "rating": book.get("rating"),
-                "author": book.get("author"),
-                "translator": list(book.get("translator") or []),
-                "genres": list(book.get("genres") or []),
-                "publishers": list(book.get("publishers") or []),
-                "year": book.get("year"),
-            }
-            if not (
-                before["rating"] in ("", None)
-                or not before["author"]
-                or not before["translator"]
-                or not before["genres"]
-                or not before["publishers"]
-                or before["year"] in ("", None)
-            ):
-                continue
-            attempts += 1
-            if attempts > 40:
-                more = True
-                break
-            enrich_book(book)
-            if apply_missing(before, book):
+        processed = 0
+
+        for book in targets[cursor:cursor + batch]:
+            snapshot = json.loads(json.dumps(book, ensure_ascii=False))
+            enrich_book(book, force=True)
+            if book != snapshot:
                 changed += 1
+            processed += 1
+
+        next_cursor = cursor + processed
+        done = next_cursor >= total
+
         if changed:
             with LOCK:
                 try:
                     current = load_books()
                 except ValueError as exc:
                     return self.send_json({"error": str(exc)}, 500)
-                filled = {book.get("id"): book for book in items}
+                refreshed = {book.get("id"): book for book in items}
                 for index, book in enumerate(current):
-                    updated = filled.get(book.get("id"))
-                    if updated and apply_missing(book, updated):
-                        current[index] = book
+                    updated = refreshed.get(book.get("id"))
+                    if updated is not None and updated != book:
+                        current[index] = updated
                 save_books(current)
                 items = current
-        self.send_json({"ok": True, "filled": changed, "more": more, "items": items})
+
+        self.send_json({
+            "ok": True,
+            "filled": changed,
+            "total": total,
+            "nextCursor": next_cursor,
+            "done": done,
+            "items": items,
+        })
 
     def handle_douban_session(self):
         if not self.require_auth():

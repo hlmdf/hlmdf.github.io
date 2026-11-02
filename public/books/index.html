@@ -828,6 +828,10 @@
 
 <p id="searchHint" style="display:none;margin:-2px 0 10px;font-size:12px;color:#8a8f98;"></p>
 
+<div style="margin:-4px 0 10px;text-align:right;">
+  <a href="#" id="aliasEditBtn" style="font-size:12px;color:#8a8f98;text-decoration:none;">别名设置</a>
+</div>
+
 <div class="filter-row">
   <span class="filter-label">出版社</span>
   <select id="regionFilter"><option value="all">全部</option></select>
@@ -1295,34 +1299,98 @@
     return full + " " + initials;
   }
 
-  // 常见昵称。按「本名 → 昵称」存，命中本名的条目会把昵称也塞进索引，
-  // 所以搜「小李子」能翻出莱昂纳多的片子，而条目里本来没有这三个字。
-  var ALIASES = [
+  /* 内置别名表。搜索「昵称」时会把对应的本名一起纳入匹配。 */
+  var DEFAULT_ALIASES = [
     ["莱昂纳多·迪卡普里奥", "小李子"],
     ["斯嘉丽·约翰逊", "寡姐"],
     ["本尼迪克特·康伯巴奇", "卷福"],
     ["汤姆·希德勒斯顿", "抖森"],
     ["小罗伯特·唐尼", "钢铁侠"],
-    ["布拉德·皮特", "皮特"],
     ["汤姆·克鲁斯", "阿汤哥"],
     ["艾玛·斯通", "石头姐"],
     ["詹妮弗·劳伦斯", "大表姐"],
     ["娜塔莉·波特曼", "波特曼"],
     ["安东尼·霍普金斯", "霍普金斯"],
-    ["克里斯蒂安·贝尔", "贝尔"],
-    ["马特·达蒙", "马特达蒙"],
+    ["克里斯蒂安·贝尔", "蝙蝠侠"],
+    ["马特·达蒙", "马达"],
     ["基努·里维斯", "基努"],
     ["尼古拉斯·凯奇", "凯奇"],
     ["约翰尼·德普", "德普"],
     ["威尔·史密斯", "史密斯"],
     ["阿尔·帕西诺", "帕西诺"],
     ["罗伯特·德尼罗", "德尼罗"],
+    ["布拉德·皮特", "皮特"],
+    ["摩根·弗里曼", "弗里曼"],
+    ["汤姆·汉克斯", "汉克斯"],
+    ["蒂姆·罗宾斯", "罗宾斯"],
+    ["安妮·海瑟薇", "海瑟薇"],
+    ["凯特·温斯莱特", "温斯莱特"],
+    ["朱莉娅·罗伯茨", "罗伯茨"],
+    ["梅丽尔·斯特里普", "斯特里普"],
+    ["乌玛·瑟曼", "乌玛"],
+    ["塞缪尔·杰克逊", "杰克逊"],
+    ["伊桑·霍克", "霍克"],
+    ["杰昆·菲尼克斯", "华金"],
+    ["希斯·莱杰", "希斯莱杰"],
+    ["保罗·沃克", "沃克"],
+    ["范·迪塞尔", "迪塞尔"],
+    ["杰森·斯坦森", "斯坦森"],
+    ["道恩·强森", "巨石强森"],
+    ["瑞恩·高斯林", "高司令"],
+    ["艾玛·沃森", "艾玛沃森"],
+    ["丹尼尔·雷德克里夫", "哈利波特"],
+    ["克里斯·埃文斯", "美队"],
+    ["马克·鲁法洛", "绿巨人"],
+    ["斯嘉丽", "黑寡妇"],
+    ["克里斯·海姆斯沃斯", "雷神"],
     ["克里斯托弗·诺兰", "诺兰"],
     ["昆汀·塔伦蒂诺", "昆汀"],
     ["马丁·斯科塞斯", "斯科塞斯"],
     ["大卫·芬奇", "芬奇"],
-    ["宫崎骏", "宫崎俊"]
+    ["史蒂文·斯皮尔伯格", "斯皮尔伯格"],
+    ["詹姆斯·卡梅隆", "卡梅隆"],
+    ["彼得·杰克逊", "彼得杰克逊"],
+    ["宫崎骏", "宫崎俊"],
+    ["新海诚", "新海城"],
+    ["是枝裕和", "是枝"],
+    ["王家卫", "墨镜王"],
+    ["周星驰", "星爷"],
+    ["周润发", "发哥"],
+    ["张国荣", "哥哥"],
+    ["梁朝伟", "伟仔"],
+    ["刘德华", "华仔"],
+    ["章子怡", "国际章"],
+    ["葛优", "葛大爷"],
+    ["沈腾", "沈叔叔"],
+    ["黄渤", "黄勃"],
+    ["易烊千玺", "四字"],
+    ["吴京", "吴京导演"]
   ];
+
+  // 用户自己加的别名存在 localStorage，和内置的合并使用。
+  var ALIASES = DEFAULT_ALIASES.slice();
+
+  function loadCustomAliases() {
+    try {
+      var raw = localStorage.getItem("search-aliases");
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(function (p) {
+        return Array.isArray(p) && p.length === 2 && p[0] && p[1];
+      });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function applyAliases(custom) {
+    ALIASES = DEFAULT_ALIASES.concat(custom || []);
+    // 索引是缓存的，别名一变就得让它们全部重算。
+    items.forEach(function (it) { delete it._hay; });
+  }
+
+  ALIASES = DEFAULT_ALIASES.concat(loadCustomAliases());
 
   function aliasText(raw) {
     var out = "";
@@ -2538,16 +2606,72 @@
     if (!mustAdmin()) return;
     saving = true;
     toast("正在从豆瓣补全资料…");
-    api("/api/books/refresh", { method: "POST", body: {} }).then(function (res) {
+    var btn = document.getElementById("updateBtn");
+    var totalFilled = 0;
+    btn.disabled = true;
+
+    function refreshStep(cursor) {
+      return api("/api/books/refresh", { method: "POST", body: { cursor: cursor } }).then(function (res) {
+        applyList(res);
+        totalFilled += res.filled || 0;
+        if (res.done) {
+          saving = false;
+          btn.disabled = false;
+          btn.textContent = "更新";
+          toast("更新完成：共 " + (res.total || 0) + " 条，补全 " + totalFilled + " 条");
+          return;
+        }
+        btn.textContent = "更新中 " + res.nextCursor + "/" + (res.total || "?");
+        return refreshStep(res.nextCursor);
+      });
+    }
+
+    refreshStep(0).catch(function (err) {
       saving = false;
-      applyList(res);
-      var message = res.filled ? "已补全 " + res.filled + " 部的资料" : "没有需要补的资料";
-      if (res.more) message += "，还有没补完的，再点一次";
-      toast(message);
-    }).catch(function (err) {
-      saving = false;
-      toast(err.message || "更新失败");
+      btn.disabled = false;
+      btn.textContent = "更新";
+      toast((err && err.message) || "更新失败");
     });
+  });
+
+  var aliasMask = document.getElementById("aliasMask");
+  var aliasInput = document.getElementById("aliasInput");
+
+  document.getElementById("aliasEditBtn").addEventListener("click", function (e) {
+    e.preventDefault();
+    aliasInput.value = loadCustomAliases().map(function (p) {
+      return p[0] + "," + p[1];
+    }).join("\n");
+    aliasMask.classList.add("show");
+    aliasInput.focus();
+  });
+
+  document.getElementById("aliasCancel").addEventListener("click", function () {
+    aliasMask.classList.remove("show");
+  });
+
+  document.getElementById("aliasSave").addEventListener("click", function () {
+    var list = [];
+    aliasInput.value.split("\n").forEach(function (line) {
+      var parts = line.split(/[,，]/);
+      if (parts.length < 2) return;
+      var real = parts[0].trim();
+      var nick = parts.slice(1).join(",").trim();
+      if (real && nick) list.push([real, nick]);
+    });
+    try {
+      localStorage.setItem("search-aliases", JSON.stringify(list));
+    } catch (err) {
+      // 隐私模式下写不进去，本次仍然生效。
+    }
+    applyAliases(list);
+    aliasMask.classList.remove("show");
+    render();
+    toast("别名已保存，共 " + (DEFAULT_ALIASES.length + list.length) + " 条");
+  });
+
+  aliasMask.addEventListener("click", function (e) {
+    if (e.target === aliasMask) aliasMask.classList.remove("show");
   });
 
   document.getElementById("exportBtn").addEventListener("click", function () {
@@ -3113,5 +3237,18 @@
   }
 })();
 </script>
+
+<div class="modal-mask" id="aliasMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aliasTitle">
+    <h3 id="aliasTitle">搜索别名</h3>
+    <p class="confirm-text">每行一条，格式「本名, 昵称」。搜索昵称时会连同本名一起匹配。内置 64 条已经生效，这里只填你自己要加的。</p>
+    <textarea id="aliasInput" rows="8" spellcheck="false" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:13px;line-height:1.7;resize:vertical;"></textarea>
+    <div class="modal-btns">
+      <button type="button" class="btn-cancel" id="aliasCancel">取消</button>
+      <button type="button" class="btn-save" id="aliasSave">保存</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
