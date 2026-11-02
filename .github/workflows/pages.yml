@@ -29,6 +29,11 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+        env:
+          # Inlined into the client bundle at build time. Set it under
+          # Settings → Secrets and variables → Actions; without it the header
+          # falls back to open-meteo.
+          NEXT_PUBLIC_AMAP_KEY: ${{ secrets.NEXT_PUBLIC_AMAP_KEY }}
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

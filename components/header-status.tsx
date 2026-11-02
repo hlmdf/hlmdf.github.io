@@ -16,12 +16,31 @@ import type { Lang } from "@/content/profile";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { cn } from "@/lib/utils";
 
-type Day = { date: string; code: number; max: number; min: number };
+/**
+ * Amap (高德) Web 服务 key. Set NEXT_PUBLIC_AMAP_KEY at build time to use the
+ * domestic source for both the IP lookup and the forecast. Left empty, the
+ * component falls back to open-meteo, which needs no key but lives abroad.
+ * The key is public by design here: it ships in the client bundle either way.
+ */
+const AMAP_KEY = (process.env.NEXT_PUBLIC_AMAP_KEY || "").trim();
+
+/** Weather condition families. Both providers map onto this, the UI reads it. */
+type Sky =
+  | "clear"
+  | "partly"
+  | "cloud"
+  | "fog"
+  | "drizzle"
+  | "rain"
+  | "snow"
+  | "storm";
+
+type Day = { date: string; sky: Sky; max: number; min: number };
 
 type Forecast = {
   temp: number;
   humidity: number;
-  code: number;
+  sky: Sky;
   days: Day[];
 };
 
@@ -36,8 +55,34 @@ type Located = {
   district: string;
   latitude?: number;
   longitude?: number;
+  /** Amap's district code, which is what its weather endpoint expects. */
+  adcode?: string;
   /** Names are already in Chinese, from the visitor's IP record. */
   chinese: boolean;
+};
+
+type SkyGlyph = ComponentType<{ className?: string; strokeWidth?: number }>;
+
+const SKY_ICONS: Record<Sky, SkyGlyph> = {
+  clear: Sun,
+  partly: CloudSun,
+  cloud: Cloud,
+  fog: CloudFog,
+  drizzle: CloudDrizzle,
+  rain: CloudRain,
+  snow: CloudSnow,
+  storm: CloudLightning,
+};
+
+const SKY_NAMES: Record<Sky, [string, string]> = {
+  clear: ["晴", "Clear"],
+  partly: ["多云", "Partly cloudy"],
+  cloud: ["阴", "Overcast"],
+  fog: ["雾", "Fog"],
+  drizzle: ["小雨", "Drizzle"],
+  rain: ["雨", "Rain"],
+  snow: ["雪", "Snow"],
+  storm: ["雷雨", "Thunderstorm"],
 };
 
 function simplify(name: string) {
@@ -96,8 +141,45 @@ function addressQuery(lines: string[], lang: Lang) {
   return lang === "zh" ? lines.join("") : lines.join(", ");
 }
 
-function mapsHref(query: string) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+function mapsHref(query: string, lang: Lang) {
+  // Google Maps is the better map for readers outside China; for Chinese
+  // readers it is simply unreachable, so they get Amap's web search instead.
+  const base =
+    lang === "zh"
+      ? "https://www.amap.com/search"
+      : "https://www.google.com/maps/search/";
+  return `${base}?query=${encodeURIComponent(query)}`;
+}
+
+/**
+ * Amap IP lookup. Returns province/city plus the adcode the weather endpoint
+ * needs. An overseas address comes back as empty arrays rather than strings,
+ * which is why every field goes through a type guard.
+ */
+async function readAmapIp(): Promise<Located | null> {
+  try {
+    const response = await fetchWithTimeout(
+      `https://restapi.amap.com/v3/ip?key=${encodeURIComponent(AMAP_KEY)}`,
+      {},
+      4000,
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data?.status !== "1") return null;
+    const province = typeof data.province === "string" ? data.province : "";
+    const city = typeof data.city === "string" ? data.city : "";
+    if (!city) return null;
+    return {
+      country: "中国",
+      region: province,
+      city,
+      district: "",
+      adcode: typeof data.adcode === "string" ? data.adcode : undefined,
+      chinese: true,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -105,6 +187,10 @@ function mapsHref(query: string) {
  * Measured at ~2s from a mainland connection.
  */
 async function readChineseIp(): Promise<Located | null> {
+  if (AMAP_KEY) {
+    const amap = await readAmapIp();
+    if (amap?.adcode) return amap;
+  }
   try {
     const response = await fetchWithTimeout("https://myip.ipip.net/json", {}, 4000);
     if (!response.ok) return null;
@@ -146,6 +232,76 @@ async function readCoords(): Promise<Located | null> {
       latitude: Number.isFinite(latitude) ? latitude : undefined,
       longitude: Number.isFinite(longitude) ? longitude : undefined,
       chinese: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** WMO weather code (open-meteo) → condition family. */
+function skyFromCode(code: number): Sky {
+  if (code === 0) return "clear";
+  if (code <= 2) return "partly";
+  if (code === 3) return "cloud";
+  if (code === 45 || code === 48) return "fog";
+  if (code >= 51 && code <= 57) return "drizzle";
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
+  if (code >= 95) return "storm";
+  if (code >= 61) return "rain";
+  return "cloud";
+}
+
+/** Amap answers in Chinese prose ("小雨", "多云"), so match on keywords. */
+function skyFromText(text: string): Sky {
+  if (/雷/.test(text)) return "storm";
+  if (/雪|冰雹|霰/.test(text)) return "snow";
+  if (/雾|霾|沙尘|浮尘/.test(text)) return "fog";
+  if (/毛毛|细雨|小雨/.test(text)) return "drizzle";
+  if (/雨/.test(text)) return "rain";
+  if (/阴/.test(text)) return "cloud";
+  if (/云/.test(text)) return "partly";
+  if (/晴/.test(text)) return "clear";
+  return "partly";
+}
+
+/**
+ * Amap forecast. Two calls: the live reading carries the current temperature
+ * and humidity, the forecast carries daily highs and lows. Amap publishes four
+ * days rather than seven, so the strip renders however many it returns.
+ */
+async function readAmapWeather(adcode: string): Promise<Forecast | null> {
+  const base =
+    `https://restapi.amap.com/v3/weather/weatherInfo?key=${encodeURIComponent(AMAP_KEY)}` +
+    `&city=${encodeURIComponent(adcode)}`;
+  try {
+    const [liveRes, castRes] = await Promise.all([
+      fetchWithTimeout(`${base}&extensions=base`, {}, 6000),
+      fetchWithTimeout(`${base}&extensions=all`, {}, 6000),
+    ]);
+    if (!liveRes.ok || !castRes.ok) return null;
+    const live = await liveRes.json();
+    const cast = await castRes.json();
+    const now = live?.lives?.[0];
+    const casts = cast?.forecasts?.[0]?.casts;
+    if (!now || !Array.isArray(casts) || casts.length === 0) return null;
+
+    return {
+      temp: Math.round(Number(now.temperature) || 0),
+      humidity: Math.round(Number(now.humidity) || 0),
+      sky: skyFromText(String(now.weather || "")),
+      days: casts.map(
+        (item: {
+          date?: string;
+          dayweather?: string;
+          daytemp?: string;
+          nighttemp?: string;
+        }) => ({
+          date: String(item.date || ""),
+          sky: skyFromText(String(item.dayweather || "")),
+          max: Math.round(Number(item.daytemp) || 0),
+          min: Math.round(Number(item.nighttemp) || 0),
+        }),
+      ),
     };
   } catch {
     return null;
@@ -195,46 +351,21 @@ function pad(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function weatherIcon(code: number): ComponentType<{ className?: string }> {
-  if (code === 0) return Sun;
-  if (code <= 2) return CloudSun;
-  if (code === 3) return Cloud;
-  if (code === 45 || code === 48) return CloudFog;
-  if (code >= 51 && code <= 57) return CloudDrizzle;
-  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return CloudSnow;
-  if (code >= 95) return CloudLightning;
-  if (code >= 61) return CloudRain;
-  return Cloud;
+function SkyIcon({
+  sky,
+  className,
+  strokeWidth,
+}: {
+  sky: Sky;
+  className?: string;
+  strokeWidth?: number;
+}) {
+  const Icon = SKY_ICONS[sky];
+  return <Icon className={className} strokeWidth={strokeWidth} />;
 }
 
-function weatherName(code: number, lang: Lang) {
-  const names: Record<string, [string, string]> = {
-    clear: ["晴", "Clear"],
-    partly: ["多云", "Partly cloudy"],
-    cloud: ["阴", "Overcast"],
-    fog: ["雾", "Fog"],
-    drizzle: ["小雨", "Drizzle"],
-    rain: ["雨", "Rain"],
-    snow: ["雪", "Snow"],
-    storm: ["雷雨", "Thunderstorm"],
-  };
-  const key =
-    code === 0
-      ? "clear"
-      : code <= 2
-        ? "partly"
-        : code === 3
-          ? "cloud"
-          : code === 45 || code === 48
-            ? "fog"
-            : code <= 57
-              ? "drizzle"
-              : code >= 95
-                ? "storm"
-                : code >= 71 && code <= 86
-                  ? "snow"
-                  : "rain";
-  const pair = names[key];
+function weatherName(sky: Sky, lang: Lang) {
+  const pair = SKY_NAMES[sky];
   return lang === "zh" ? pair[0] : pair[1];
 }
 
@@ -308,15 +439,19 @@ export function HeaderStatus() {
     let cancelled = false;
 
     async function locate() {
-      // Both lookups run together rather than one after the other. The domestic
-      // source answers with Chinese names, the backup answers with coordinates,
-      // and the coordinates are what let us skip the city-name geocode below.
-      const [zh, geo] = await Promise.all([readChineseIp(), readCoords()]);
+      // Amap answers for an adcode, so neither the coordinate lookup nor the
+      // city-name geocode below is needed when it is configured.
+      const [zh, geo] = await Promise.all([
+        readChineseIp(),
+        AMAP_KEY ? Promise.resolve(null) : readCoords(),
+      ]);
       if (cancelled) return;
 
       const located = zh ?? geo;
       if (!located) return;
       setIp(located);
+
+      if (AMAP_KEY) return;
 
       if (geo?.latitude != null && geo.longitude != null) {
         setCoords({ latitude: geo.latitude, longitude: geo.longitude });
@@ -383,12 +518,26 @@ export function HeaderStatus() {
     };
   }, [ip, lang, coords]);
 
+  const adcode = AMAP_KEY ? (ip?.adcode ?? "") : "";
+
   useEffect(() => {
-    if (!coords) return;
-    const here = coords;
+    // Amap needs only the district code; the fallback needs latitude/longitude.
+    // Exactly one of the two is ever set, so a single effect serves both.
+    if (AMAP_KEY) {
+      if (!adcode) return;
+    } else if (!coords) {
+      return;
+    }
     let cancelled = false;
 
     async function load() {
+      if (AMAP_KEY) {
+        const reading = await readAmapWeather(adcode);
+        if (!cancelled && reading) setForecast(reading);
+        return;
+      }
+      const here = coords;
+      if (!here) return;
       try {
         const url = new URL("https://api.open-meteo.com/v1/forecast");
         url.searchParams.set("latitude", String(here.latitude));
@@ -410,10 +559,10 @@ export function HeaderStatus() {
         setForecast({
           temp: Math.round(data.current.temperature_2m),
           humidity: Math.round(data.current.relative_humidity_2m),
-          code: data.current.weather_code,
+          sky: skyFromCode(data.current.weather_code),
           days: data.daily.time.map((date: string, index: number) => ({
             date,
-            code: data.daily.weather_code[index],
+            sky: skyFromCode(data.daily.weather_code[index]),
             max: Math.round(data.daily.temperature_2m_max[index]),
             min: Math.round(data.daily.temperature_2m_min[index]),
           })),
@@ -429,10 +578,10 @@ export function HeaderStatus() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [coords]);
+  }, [adcode, coords]);
 
   const clock = now ? clockOf(now, lang) : null;
-  const CurrentIcon = forecast ? weatherIcon(forecast.code) : Cloud;
+  const days = forecast?.days ?? [];
 
   return (
     <div className="flex items-center gap-0.5 border-l border-border pl-1">
@@ -487,14 +636,18 @@ export function HeaderStatus() {
           aria-label={
             forecast
               ? lang === "zh"
-                ? `${place?.city ? `${place.city} ` : ""}${forecast.temp}度，湿度 ${forecast.humidity}%，${weatherName(forecast.code, lang)}`
-                : `${place?.city ? `${place.city} ` : ""}${forecast.temp} degrees, humidity ${forecast.humidity} percent, ${weatherName(forecast.code, lang)}`
+                ? `${place?.city ? `${place.city} ` : ""}${forecast.temp}度，湿度 ${forecast.humidity}%，${weatherName(forecast.sky, lang)}`
+                : `${place?.city ? `${place.city} ` : ""}${forecast.temp} degrees, humidity ${forecast.humidity} percent, ${weatherName(forecast.sky, lang)}`
               : lang === "zh"
                 ? "天气"
                 : "Weather"
           }
         >
-          <CurrentIcon className="size-4 shrink-0" strokeWidth={1.75} />
+          <SkyIcon
+            sky={forecast?.sky ?? "cloud"}
+            className="size-4 shrink-0"
+            strokeWidth={1.75}
+          />
           <span className="inline-flex items-start">
             <span>{forecast ? forecast.temp : "--"}</span>
             <span className="mt-px text-[0.7em] leading-none">°</span>
@@ -522,29 +675,31 @@ export function HeaderStatus() {
             className="status-line mt-3 text-xs text-muted-foreground"
             style={{ animationDelay: "90ms" }}
           >
-            {lang === "zh" ? "未来七天" : "Next 7 days"}
+            {lang === "zh" ? `未来${days.length}天` : `Next ${days.length} days`}
           </p>
-          <ul className="mt-2 grid grid-cols-7 gap-1">
-            {(forecast?.days ?? []).map((day, index) => {
-              const Icon = weatherIcon(day.code);
-              return (
-                <li
-                  key={day.date}
-                  title={weatherName(day.code, lang)}
-                  className="status-line flex flex-col items-center gap-0.5 text-center"
-                  style={{ animationDelay: `${140 + index * 35}ms` }}
-                >
-                  <span className="text-[11px] text-muted-foreground">
-                    {dayLabel(day.date, lang)}
-                  </span>
-                  <Icon className="my-0.5 size-4" />
-                  <span className="text-xs tabular-nums">{day.max}°</span>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {day.min}°
-                  </span>
-                </li>
-              );
-            })}
+          <ul
+            className="mt-2 grid gap-1"
+            style={{
+              gridTemplateColumns: `repeat(${Math.max(days.length, 1)}, minmax(0, 1fr))`,
+            }}
+          >
+            {days.map((day, index) => (
+              <li
+                key={day.date}
+                title={weatherName(day.sky, lang)}
+                className="status-line flex flex-col items-center gap-0.5 text-center"
+                style={{ animationDelay: `${140 + index * 35}ms` }}
+              >
+                <span className="text-[11px] text-muted-foreground">
+                  {dayLabel(day.date, lang)}
+                </span>
+                <SkyIcon sky={day.sky} className="my-0.5 size-4" />
+                <span className="text-xs tabular-nums">{day.max}°</span>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {day.min}°
+                </span>
+              </li>
+            ))}
           </ul>
         </Popover>
       </div>
@@ -552,7 +707,7 @@ export function HeaderStatus() {
       {place?.city ? (
         <div className="group relative flex items-center">
           <a
-            href={mapsHref(place.query)}
+            href={mapsHref(place.query, lang)}
             target="_blank"
             rel="noreferrer"
             className={controlClass}
