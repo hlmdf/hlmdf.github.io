@@ -1105,6 +1105,18 @@
   </div>
 </footer>
 
+<div class="modal-mask" id="aliasMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aliasTitle">
+    <h3 id="aliasTitle">搜索别名</h3>
+    <p class="confirm-text">每行一条，格式「本名, 昵称」。搜索昵称时会连同本名一起匹配。内置 64 条已经生效，这里只填你自己要加的。</p>
+    <textarea id="aliasInput" rows="8" spellcheck="false" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:13px;line-height:1.7;resize:vertical;"></textarea>
+    <div class="modal-btns">
+      <button type="button" class="btn-cancel" id="aliasCancel">取消</button>
+      <button type="button" class="btn-save" id="aliasSave">保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -2637,8 +2649,13 @@
 
   var aliasMask = document.getElementById("aliasMask");
   var aliasInput = document.getElementById("aliasInput");
+  var aliasEditBtn = document.getElementById("aliasEditBtn");
 
-  document.getElementById("aliasEditBtn").addEventListener("click", function (e) {
+  // 这段脚本在页面顶部执行，元素必须已经存在；缺一个就整块跳过，
+  // 否则一个 null 会把后面所有初始化都带崩。
+  if (aliasMask && aliasInput && aliasEditBtn) {
+
+  aliasEditBtn.addEventListener("click", function (e) {
     e.preventDefault();
     aliasInput.value = loadCustomAliases().map(function (p) {
       return p[0] + "," + p[1];
@@ -2674,6 +2691,8 @@
   aliasMask.addEventListener("click", function (e) {
     if (e.target === aliasMask) aliasMask.classList.remove("show");
   });
+
+  }
 
   document.getElementById("exportBtn").addEventListener("click", function () {
     var blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
@@ -3239,17 +3258,6 @@
 })();
 </script>
 
-<div class="modal-mask" id="aliasMask">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aliasTitle">
-    <h3 id="aliasTitle">搜索别名</h3>
-    <p class="confirm-text">每行一条，格式「本名, 昵称」。搜索昵称时会连同本名一起匹配。内置 64 条已经生效，这里只填你自己要加的。</p>
-    <textarea id="aliasInput" rows="8" spellcheck="false" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:13px;line-height:1.7;resize:vertical;"></textarea>
-    <div class="modal-btns">
-      <button type="button" class="btn-cancel" id="aliasCancel">取消</button>
-      <button type="button" class="btn-save" id="aliasSave">保存</button>
-    </div>
-  </div>
-</div>
 
 </body>
 </html>
