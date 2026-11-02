@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MapPin, X } from "lucide-react";
 import { useSite } from "@/components/site-provider";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { cn } from "@/lib/utils";
 
 /* 【2026-10-16 新增】页脚访客地图
@@ -89,7 +90,11 @@ function loadLeaflet(): Promise<LeafletNamespace> {
 /** 按 IP 查一次访客所在城市（拿不到就返回空对象，只计次数不落点） */
 async function locate(): Promise<Record<string, unknown>> {
   try {
-    const res = await fetch("https://api.ip.sb/geoip", { cache: "no-store" });
+    const res = await fetchWithTimeout(
+      "https://api.ip.sb/geoip",
+      { cache: "no-store" },
+      4000,
+    );
     if (!res.ok) return {};
     const data = (await res.json()) as {
       latitude?: number;
@@ -116,12 +121,16 @@ async function request(
   body?: Record<string, unknown>,
 ): Promise<Stats | null> {
   try {
-    const res = await fetch(API_BASE + path, {
-      method: body ? "POST" : "GET",
-      headers: body ? { "Content-Type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      cache: "no-store",
-    });
+    const res = await fetchWithTimeout(
+      API_BASE + path,
+      {
+        method: body ? "POST" : "GET",
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        cache: "no-store",
+      },
+      8000,
+    );
     if (!res.ok) return null;
     return (await res.json()) as Stats;
   } catch {

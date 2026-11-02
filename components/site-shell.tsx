@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { GraduationCap, Mail, MapPin, Menu, Moon, Sun, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderStatus } from "@/components/header-status";
@@ -17,16 +17,27 @@ import {
 import { pick } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 
-const nav = [
+type NavItem = { href: string; zh: string; en: string };
+
+/*
+ * Talks and news only appear once there is something to read. An empty section
+ * is worse than a missing one on an academic homepage — visitors who click
+ * through to a blank page assume the site is broken.
+ */
+const nav: NavItem[] = [
   { href: "/", zh: "关于", en: "About" },
   { href: "/publications", zh: "论文", en: "Papers" },
-  { href: "/talks", zh: "报告", en: "Talks" },
-  { href: "/news", zh: "新闻", en: "News" },
+  ...(profile.talks.length > 0
+    ? [{ href: "/talks", zh: "报告", en: "Talks" }]
+    : []),
+  ...(profile.news.length > 0
+    ? [{ href: "/news", zh: "新闻", en: "News" }]
+    : []),
   { href: "/life", zh: "生活", en: "Life" },
   { href: "/tools", zh: "实用工具", en: "Tools" },
   { href: "/links", zh: "网址", en: "Links" },
   { href: "/personal", zh: "个人工具", en: "Personal" },
-] as const;
+];
 
 function WechatIcon({ className }: { className?: string }) {
   return (
@@ -63,6 +74,7 @@ function normalize(path: string) {
 type Phase = "cover" | "moving" | "returning" | "in";
 
 const MOVE_MS = 700;
+const COVER_AUTO_MS = 2600;
 const ENTERED_KEY = "site-entered";
 
 function prefersReducedMotion() {
@@ -80,6 +92,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const fromAvatar = useRef<DOMRect | null>(null);
   const holdHeight = useRef(0);
   const pendingHome = useRef(false);
+  const manualCover = useRef(false);
   const flipToken = useRef(0);
   const open = menuPath === pathname;
   const year = new Date().getFullYear();
@@ -103,8 +116,9 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   function enter() {
     if (phase !== "cover") return;
+    manualCover.current = false;
     try {
-      sessionStorage.setItem(ENTERED_KEY, "1");
+      localStorage.setItem(ENTERED_KEY, "1");
     } catch {
       // Storage can be blocked. The cover still closes for this view.
     }
@@ -125,8 +139,9 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   function returnToCover() {
     if (phase !== "in") return;
+    manualCover.current = true;
     try {
-      sessionStorage.removeItem(ENTERED_KEY);
+      localStorage.removeItem(ENTERED_KEY);
     } catch {
       // Storage can be blocked. This view still returns to the cover.
     }
@@ -142,22 +157,46 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     if (phase === "returning") return;
-    let entered = false;
+    let seen = false;
     try {
-      entered = sessionStorage.getItem(ENTERED_KEY) === "1";
+      seen = localStorage.getItem(ENTERED_KEY) === "1";
     } catch {
-      entered = false;
+      // Without storage the cover would lock the visitor out, so skip it.
+      seen = true;
     }
     if (pathname !== "/" && phase === "in") {
       try {
-        sessionStorage.setItem(ENTERED_KEY, "1");
+        localStorage.setItem(ENTERED_KEY, "1");
       } catch {
         // Ignore storage failures and keep the current page.
       }
       return;
     }
-    if (entered && phase === "cover") setPhase("in");
+    if (seen && phase === "cover") setPhase("in");
   }, [pathname, phase]);
+
+  /*
+   * The cover is a flourish, not a gate. A timer, a scroll, a tap or any key
+   * dismisses it, so a first-time visitor never has to find the "Enter" link.
+   * Returning to the cover by clicking the site title re-arms the manual state
+   * and suppresses the timer, because that visit was deliberate.
+   */
+  useEffect(() => {
+    if (phase !== "cover") return;
+    const go = () => enter();
+    const timer = manualCover.current
+      ? 0
+      : window.setTimeout(go, COVER_AUTO_MS);
+    window.addEventListener("wheel", go, { passive: true });
+    window.addEventListener("keydown", go);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      window.removeEventListener("wheel", go);
+      window.removeEventListener("keydown", go);
+    };
+    // enter() only acts while phase is "cover"; phase is the real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   useLayoutEffect(() => {
     const from = fromRect.current;
@@ -385,6 +424,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
           ) : null}
           <div
             data-cover
+            onClick={phase === "cover" ? enter : undefined}
             className={cn(
               coverLayout &&
                 "fixed inset-0 z-20 flex items-center justify-center px-6",
@@ -525,8 +565,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 </a>
               )}
             </li>
-            <li>
-              {profile.scholar ? (
+            {profile.scholar ? (
+              <li>
                 <a
                   className="inline-flex items-center gap-2 text-foreground underline decoration-[#bdc1c4] underline-offset-4 hover:text-primary hover:decoration-primary"
                   href={profile.scholar}
@@ -536,13 +576,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
                   <GraduationCap className="size-4 shrink-0" aria-hidden="true" />
                   Google Scholar
                 </a>
-              ) : (
-                <span className="inline-flex items-center gap-2">
-                  <GraduationCap className="size-4 shrink-0" aria-hidden="true" />
-                  Google Scholar
-                </span>
-              )}
-            </li>
+              </li>
+            ) : null}
             {profile.cv ? (
               <li>
                 <a

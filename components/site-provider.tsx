@@ -22,8 +22,13 @@ function subscribe(listener: () => void) {
 }
 
 function readLang(): Lang {
-  const stored = localStorage.getItem("lang");
-  return stored === "zh" ? "zh" : "en";
+  try {
+    return localStorage.getItem("lang") === "zh" ? "zh" : "en";
+  } catch {
+    // Storage can be blocked (private mode, enterprise policy, embedded frame).
+    // Falling back keeps the shell mounted instead of throwing out of the store.
+    return "en";
+  }
 }
 
 function emit() {
@@ -34,7 +39,11 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const lang = useSyncExternalStore(subscribe, readLang, () => "en" as const);
 
   function setLang(next: Lang) {
-    localStorage.setItem("lang", next);
+    try {
+      localStorage.setItem("lang", next);
+    } catch {
+      // Language still switches for this view when storage is unavailable.
+    }
     document.documentElement.lang = next === "zh" ? "zh-CN" : "en";
     emit();
   }
@@ -59,7 +68,11 @@ export function toggleTheme() {
   const nextDark = !root.classList.contains("dark");
   const apply = () => {
     root.classList.toggle("dark", nextDark);
-    localStorage.setItem("theme", nextDark ? "dark" : "light");
+    try {
+      localStorage.setItem("theme", nextDark ? "dark" : "light");
+    } catch {
+      // The theme still applies for this view when storage is unavailable.
+    }
   };
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduced || typeof document.startViewTransition !== "function") {

@@ -37,19 +37,40 @@ try {
 
 const enteredBoot = `
 try {
-  var entered = sessionStorage.getItem("site-entered") === "1";
+  var seen = localStorage.getItem("site-entered") === "1";
   var path = location.pathname.replace(/\\/+$/, "") || "/";
   var home = ${JSON.stringify((process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/+$/, "") || "/")};
-  if (entered || path !== home) document.documentElement.classList.add("site-entered");
-} catch (e) {}
+  if (seen || path !== home) document.documentElement.classList.add("site-entered");
+} catch (e) {
+  document.documentElement.classList.add("site-entered");
+}
 `;
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://hlmdf.github.io"),
   title: {
-    default: "李璇",
+    default: "李璇 · 武汉大学人工智能学院博士生",
     template: "%s · 李璇",
   },
-  description: "李璇的个人主页。简介、论文和报告。",
+  description:
+    "李璇，武汉大学人工智能学院智能科学与技术专业博士研究生。研究方向包括科技文献多模态理解、图学习与复杂网络。",
+  openGraph: {
+    type: "website",
+    locale: "zh_CN",
+    alternateLocale: ["en_US"],
+    siteName: "李璇的主页",
+    title: "李璇 · 武汉大学人工智能学院博士生",
+    description:
+      "李璇，武汉大学人工智能学院智能科学与技术专业博士研究生。研究方向包括科技文献多模态理解、图学习与复杂网络。",
+    images: ["/avatar.jpg"],
+  },
+  twitter: {
+    card: "summary",
+    title: "李璇 · 武汉大学人工智能学院博士生",
+    description:
+      "李璇，武汉大学人工智能学院智能科学与技术专业博士研究生。研究方向包括科技文献多模态理解、图学习与复杂网络。",
+    images: ["/avatar.jpg"],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -60,12 +81,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <head>
-        {/* CJK is not a next/font subset for Noto Sans SC, so the stylesheet is loaded here. */}
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&display=swap"
-        />
+        {/* CJK glyphs fall back to the system stack declared in globals.css. */}
+        {/* Loading Noto from fonts.googleapis.com was render-blocking and is
+            unreachable from mainland China, so the stylesheet is not requested. */}
         <script dangerouslySetInnerHTML={{ __html: enteredBoot }} />
         <style
           dangerouslySetInnerHTML={{

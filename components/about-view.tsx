@@ -46,9 +46,9 @@ export function AboutView() {
           {profile.bio.map((paragraph) => (
             <p key={paragraph.en}>{pick(paragraph, lang)}</p>
           ))}
-          <p>
-            {lang === "zh" ? "完整简历可以在" : "You can find my full CV "}
-            {profile.cv ? (
+          {profile.cv ? (
+            <p>
+              {lang === "zh" ? "完整简历可以在" : "You can find my full CV "}
               <a
                 className="text-primary underline underline-offset-4 hover:text-link-hover"
                 href={profile.cv}
@@ -57,13 +57,9 @@ export function AboutView() {
               >
                 {lang === "zh" ? "这里" : "here"}
               </a>
-            ) : (
-              <span className="text-primary underline underline-offset-4">
-                {lang === "zh" ? "这里" : "here"}
-              </span>
-            )}
-            {lang === "zh" ? "查看。" : "."}
-          </p>
+              {lang === "zh" ? "查看。" : "."}
+            </p>
+          ) : null}
         </div>
       </Section>
 

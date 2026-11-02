@@ -69,3 +69,14 @@ next-env.d.ts
 /tools/reminder-tool/auth.json
 /tools/reminder-tool/*.zip
 /tools/reminder-tool/.preview*
+
+# Flight radar: the proxy's response cache and packaging artifacts.
+/ps.json
+/tools/air-radar/__pycache__/
+/tools/air-radar/*.zip
+
+# Local screenshot scratch space.
+/.screenshots/.tmp/
+
+# Local assistant workspace state.
+/.workbuddy/

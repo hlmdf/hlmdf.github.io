@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useSite } from "@/components/site-provider";
 import type { Lang } from "@/content/profile";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { cn } from "@/lib/utils";
 
 type Day = { date: string; code: number; max: number; min: number };
@@ -101,7 +102,7 @@ function mapsHref(query: string) {
 
 async function readVisitor(): Promise<Located | null> {
   try {
-    const response = await fetch("https://myip.ipip.net/json");
+    const response = await fetchWithTimeout("https://myip.ipip.net/json", {}, 4000);
     if (response.ok) {
       const data = await response.json();
       const location = data?.data?.location;
@@ -120,7 +121,7 @@ async function readVisitor(): Promise<Located | null> {
   }
 
   try {
-    const response = await fetch("https://api.ip.sb/geoip");
+    const response = await fetchWithTimeout("https://api.ip.sb/geoip", {}, 4000);
     if (!response.ok) return null;
     const data = await response.json();
     const latitude = Number(data.latitude);
@@ -146,7 +147,7 @@ async function geocodeCity(city: string, region: string) {
   url.searchParams.set("count", "5");
   url.searchParams.set("language", "zh");
   url.searchParams.set("format", "json");
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {}, 7000);
   if (!response.ok) return null;
   const data = await response.json();
   const results: Array<{ admin1?: string; latitude: number; longitude: number }> =
@@ -163,7 +164,7 @@ async function reverseCity(coords: Coords, lang: Lang): Promise<Place | null> {
   url.searchParams.set("latitude", String(coords.latitude));
   url.searchParams.set("longitude", String(coords.longitude));
   url.searchParams.set("localityLanguage", lang === "zh" ? "zh" : "en");
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {}, 7000);
   if (!response.ok) return null;
   const data = await response.json();
   const admin = Array.isArray(data?.localityInfo?.administrative)
@@ -379,7 +380,7 @@ export function HeaderStatus() {
         );
         url.searchParams.set("timezone", "auto");
         url.searchParams.set("forecast_days", "7");
-        const response = await fetch(url);
+        const response = await fetchWithTimeout(url, {}, 9000);
         if (!response.ok) return;
         const data = await response.json();
         if (cancelled) return;
