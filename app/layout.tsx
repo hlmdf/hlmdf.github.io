@@ -49,26 +49,23 @@ try {
 export const metadata: Metadata = {
   metadataBase: new URL("https://hlmdf.github.io"),
   title: {
-    default: "李璇 · 武汉大学人工智能学院博士生",
-    template: "%s · 李璇",
+    default: "李璇的主页",
+    template: "%s · 李璇的主页",
   },
   description:
     "李璇，武汉大学人工智能学院智能科学与技术专业博士研究生。研究方向包括科技文献多模态理解、图学习与复杂网络。",
+  // title and description are left out of purpose: Next falls back to the
+  // resolved page metadata, so every page shares the site card without every
+  // page showing the same headline.
   openGraph: {
     type: "website",
     locale: "zh_CN",
     alternateLocale: ["en_US"],
     siteName: "李璇的主页",
-    title: "李璇 · 武汉大学人工智能学院博士生",
-    description:
-      "李璇，武汉大学人工智能学院智能科学与技术专业博士研究生。研究方向包括科技文献多模态理解、图学习与复杂网络。",
     images: ["/avatar.jpg"],
   },
   twitter: {
     card: "summary",
-    title: "李璇 · 武汉大学人工智能学院博士生",
-    description:
-      "李璇，武汉大学人工智能学院智能科学与技术专业博士研究生。研究方向包括科技文献多模态理解、图学习与复杂网络。",
     images: ["/avatar.jpg"],
   },
 };

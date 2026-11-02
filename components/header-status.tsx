@@ -100,26 +100,37 @@ function mapsHref(query: string) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
-async function readVisitor(): Promise<Located | null> {
+/**
+ * Domestic lookup: returns Chinese province/city/district but no coordinates.
+ * Measured at ~2s from a mainland connection.
+ */
+async function readChineseIp(): Promise<Located | null> {
   try {
     const response = await fetchWithTimeout("https://myip.ipip.net/json", {}, 4000);
-    if (response.ok) {
-      const data = await response.json();
-      const location = data?.data?.location;
-      if (data?.ret === "ok" && Array.isArray(location) && location[2]) {
-        return {
-          country: String(location[0] || ""),
-          region: String(location[1] || ""),
-          city: String(location[2] || ""),
-          district: String(location[3] || ""),
-          chinese: true,
-        };
-      }
+    if (!response.ok) return null;
+    const data = await response.json();
+    const location = data?.data?.location;
+    if (data?.ret !== "ok" || !Array.isArray(location) || !location[2]) {
+      return null;
     }
+    return {
+      country: String(location[0] || ""),
+      region: String(location[1] || ""),
+      city: String(location[2] || ""),
+      district: String(location[3] || ""),
+      chinese: true,
+    };
   } catch {
-    // Try the next lookup. Some networks block this one.
+    return null;
   }
+}
 
+/**
+ * Backup lookup. It carries latitude/longitude, which is the part that matters:
+ * with coordinates in hand the city-name geocode below can be skipped entirely,
+ * and that single call used to cost more than everything else combined.
+ */
+async function readCoords(): Promise<Located | null> {
   try {
     const response = await fetchWithTimeout("https://api.ip.sb/geoip", {}, 4000);
     if (!response.ok) return null;
@@ -297,15 +308,24 @@ export function HeaderStatus() {
     let cancelled = false;
 
     async function locate() {
-      const found = await readVisitor();
-      if (cancelled || !found) return;
-      setIp(found);
-      if (found.latitude != null && found.longitude != null) {
-        setCoords({ latitude: found.latitude, longitude: found.longitude });
+      // Both lookups run together rather than one after the other. The domestic
+      // source answers with Chinese names, the backup answers with coordinates,
+      // and the coordinates are what let us skip the city-name geocode below.
+      const [zh, geo] = await Promise.all([readChineseIp(), readCoords()]);
+      if (cancelled) return;
+
+      const located = zh ?? geo;
+      if (!located) return;
+      setIp(located);
+
+      if (geo?.latitude != null && geo.longitude != null) {
+        setCoords({ latitude: geo.latitude, longitude: geo.longitude });
         return;
       }
+
+      if (!located.city) return;
       try {
-        const point = await geocodeCity(found.city, found.region);
+        const point = await geocodeCity(located.city, located.region);
         if (!cancelled && point) setCoords(point);
       } catch {
         // The city can still show when the forecast coordinates are missing.
@@ -325,7 +345,10 @@ export function HeaderStatus() {
     const located = ip;
     async function namePlace() {
       const here = coords;
-      if (here) {
+      // The domestic lookup already returns Chinese names. Re-resolving those
+      // through a foreign reverse-geocoder buys nothing and costs a round trip.
+      const skipLookup = lang === "zh" && located.chinese;
+      if (here && !skipLookup) {
         try {
           const named = await reverseCity(here, lang);
           if (!cancelled && named) {

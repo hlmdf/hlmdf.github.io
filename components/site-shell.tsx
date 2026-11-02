@@ -74,7 +74,6 @@ function normalize(path: string) {
 type Phase = "cover" | "moving" | "returning" | "in";
 
 const MOVE_MS = 700;
-const COVER_AUTO_MS = 2600;
 const ENTERED_KEY = "site-entered";
 
 function prefersReducedMotion() {
@@ -92,7 +91,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const fromAvatar = useRef<DOMRect | null>(null);
   const holdHeight = useRef(0);
   const pendingHome = useRef(false);
-  const manualCover = useRef(false);
   const flipToken = useRef(0);
   const open = menuPath === pathname;
   const year = new Date().getFullYear();
@@ -116,7 +114,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   function enter() {
     if (phase !== "cover") return;
-    manualCover.current = false;
     try {
       localStorage.setItem(ENTERED_KEY, "1");
     } catch {
@@ -139,7 +136,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   function returnToCover() {
     if (phase !== "in") return;
-    manualCover.current = true;
     try {
       localStorage.removeItem(ENTERED_KEY);
     } catch {
@@ -176,21 +172,16 @@ export function SiteShell({ children }: { children: ReactNode }) {
   }, [pathname, phase]);
 
   /*
-   * The cover is a flourish, not a gate. A timer, a scroll, a tap or any key
-   * dismisses it, so a first-time visitor never has to find the "Enter" link.
-   * Returning to the cover by clicking the site title re-arms the manual state
-   * and suppresses the timer, because that visit was deliberate.
+   * The cover never advances on its own — the "Enter" link, a scroll, a key or
+   * a tap dismisses it. Scrolling and clicking are the two things a visitor
+   * tries before reading the link, so they are wired up explicitly.
    */
   useEffect(() => {
     if (phase !== "cover") return;
     const go = () => enter();
-    const timer = manualCover.current
-      ? 0
-      : window.setTimeout(go, COVER_AUTO_MS);
     window.addEventListener("wheel", go, { passive: true });
     window.addEventListener("keydown", go);
     return () => {
-      if (timer) window.clearTimeout(timer);
       window.removeEventListener("wheel", go);
       window.removeEventListener("keydown", go);
     };
@@ -565,8 +556,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 </a>
               )}
             </li>
-            {profile.scholar ? (
-              <li>
+            <li>
+              {profile.scholar ? (
                 <a
                   className="inline-flex items-center gap-2 text-foreground underline decoration-[#bdc1c4] underline-offset-4 hover:text-primary hover:decoration-primary"
                   href={profile.scholar}
@@ -576,8 +567,13 @@ export function SiteShell({ children }: { children: ReactNode }) {
                   <GraduationCap className="size-4 shrink-0" aria-hidden="true" />
                   Google Scholar
                 </a>
-              </li>
-            ) : null}
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <GraduationCap className="size-4 shrink-0" aria-hidden="true" />
+                  Google Scholar
+                </span>
+              )}
+            </li>
             {profile.cv ? (
               <li>
                 <a
