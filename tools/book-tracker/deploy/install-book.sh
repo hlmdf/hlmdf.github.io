@@ -115,4 +115,5 @@ echo "  对外：https://47.103.222.155:${PORT_PUBLIC}/"
 echo "  数据：${APP_DIR}/books.json"
 echo "  日志：journalctl -u ${SERVICE} -f"
 echo
+echo "如果外网打不开，去阿里云控制台确认安全组放行了 ${PORT_PUBLIC}/TCP。"
 echo "主页的「我的书单」入口指向 /books/，那条页面随 GitHub Pages 发布。"
