@@ -1270,6 +1270,13 @@
     return matchFilters(item);
   }
 
+  // 归一化：去掉空格、间隔号和各种标点，让「汤姆·汉克斯」「汤姆汉克斯」「TOM HANKS」
+  // 在比较时等价。豆瓣返回的人名带间隔号，而人输入时很少打它。
+  function normText(text) {
+    return String(text || "").toLowerCase()
+      .replace(/[\s·・•.\-_/\\,，、;；:：()（）\[\]【】"'“”‘’]+/g, "");
+  }
+
   function matchFilters(item) {
     if (curType !== "all" && item.type !== curType) return false;
     if (curRegion !== "all" && (!item.regions || item.regions.indexOf(curRegion) === -1)) return false;
@@ -1286,9 +1293,18 @@
       }
     }
     if (keyword) {
-      var hay = (item.title + " " + (item.titleEn || "") + " " +
-                 (item.director || "") + " " + (item.actors || []).join(" ")).toLowerCase();
-      if (hay.indexOf(keyword) === -1) return false;
+      var hay = normText([
+        item.title, item.titleEn, item.director,
+        (item.actors || []).join(" "),
+        (item.genres || []).join(" "),
+        (item.regions || []).join(" ")
+      ].join(" "));
+      // 空格分词，每个词都要命中，所以「诺兰 星际」能搜到《星际穿越》。
+      var terms = keyword.split(/\s+/);
+      for (var t = 0; t < terms.length; t += 1) {
+        var term = normText(terms[t]);
+        if (term && hay.indexOf(term) === -1) return false;
+      }
     }
     return true;
   }

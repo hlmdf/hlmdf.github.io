@@ -1256,6 +1256,13 @@
     return matchFilters(item);
   }
 
+  // 归一化：去掉空格、间隔号和各种标点，让「汤姆·汉克斯」「汤姆汉克斯」「TOM HANKS」
+  // 在比较时等价。豆瓣返回的人名带间隔号，而人输入时很少打它。
+  function normText(text) {
+    return String(text || "").toLowerCase()
+      .replace(/[\s·・•.\-_/\\,，、;；:：()（）\[\]【】"'“”‘’]+/g, "");
+  }
+
   function matchFilters(item) {
     if (curRegion !== "all" && (!item.publishers || item.publishers.indexOf(curRegion) === -1)) return false;
     if (curGenre !== "all" && (!item.genres || item.genres.indexOf(curGenre) === -1)) return false;
@@ -1271,9 +1278,19 @@
       }
     }
     if (keyword) {
-      var hay = (item.title + " " + (item.titleEn || "") + " " +
-                 (item.author || "") + " " + (item.translator || []).join(" ")).toLowerCase();
-      if (hay.indexOf(keyword) === -1) return false;
+      var hay = normText([
+        item.title, item.titleEn, item.author,
+        (item.translator || []).join(" "),
+        (item.publishers || []).join(" "),
+        (item.genres || []).join(" "),
+        (item.tags || []).join(" ")
+      ].join(" "));
+      // 空格分词，每个词都要命中，所以「诺兰 星际」式的组合查询也成立。
+      var terms = keyword.split(/\s+/);
+      for (var t = 0; t < terms.length; t += 1) {
+        var term = normText(terms[t]);
+        if (term && hay.indexOf(term) === -1) return false;
+      }
     }
     return true;
   }
