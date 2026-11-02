@@ -44,6 +44,16 @@ yarn-error.log*
 /tools/movie-tracker/__pycache__/
 /tools/movie-tracker/config.json.tmp
 
+# book list and admin password, kept on the server only
+/tools/book-tracker/config.json
+/tools/book-tracker/books.json
+/tools/book-tracker/books.json.bak
+/tools/book-tracker/books.json.tmp
+/tools/book-tracker/douban_session.json
+/tools/book-tracker/douban_pending.json
+/tools/book-tracker/__pycache__/
+/tools/book-tracker/config.json.tmp
+
 # FileDrop runtime data is kept on the server.
 /tools/filedrop/node_modules/
 /tools/filedrop/uploads/

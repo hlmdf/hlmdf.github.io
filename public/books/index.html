@@ -1,0 +1,3007 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 关键：不发送 Referer，豆瓣图床才允许本站加载封面图 -->
+<meta name="referrer" content="no-referrer">
+<title>我的书单</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1e29;
+    --card-hover: #202634;
+    --text: #e8eaf0;
+    --muted: #8b93a7;
+    --accent: #f0b429;
+    --line: #2a3040;
+    --watched: #34c98e;
+    --doing: #e08a3c;
+    --want: #5aa9ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    min-height: 100vh;
+    padding-bottom: 88px;
+  }
+  button { font-family: inherit; }
+
+  /* ---------- 头部 ---------- */
+  header {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 4px;
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header .title-block h1 { font-size: 32px; letter-spacing: 2px; }
+  header .title-block h1 span { color: var(--accent); }
+  header .title-block p { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  .backup-btns { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .backup-btns button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .backup-btns button:hover { color: var(--accent); border-color: var(--accent); }
+  .backup-btns button.on { color: var(--accent); border-color: var(--accent); }
+  .home-link {
+    display: inline-block;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    text-decoration: none;
+  }
+  .home-link:hover { color: var(--accent); }
+  .header-links { display: flex; flex-wrap: wrap; gap: 16px; }
+  .douban-shortcut { color: #42bd56; }
+  body:not(.is-admin) #importBtn,
+  body:not(.is-admin) #doubanImportBtn,
+  body:not(.is-admin) #updateBtn,
+  body:not(.is-admin) #clearBtn,
+  body:not(.is-admin) #changePasswordBtn { display: none; }
+  #clearBtn { color: #e05a4e; border-color: rgba(224, 90, 78, .55); }
+  #clearBtn:hover { color: #ff8b82; border-color: #e05a4e; }
+  #loginBtn {
+    color: #111;
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ---------- 工具栏 ---------- */
+  .toolbar {
+    max-width: 1200px;
+    margin: 18px auto 0;
+    padding: 0 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+  .tabs { display: flex; gap: 8px; }
+  .tabs button {
+    background: var(--card);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #111;
+    font-weight: 600;
+  }
+  .tabs button .count { font-size: 12px; opacity: .75; margin-left: 4px; }
+  .search {
+    margin-left: auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 16px;
+    color: var(--text);
+    font-size: 14px;
+    width: 200px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .search:focus { border-color: var(--accent); }
+  .search::placeholder { color: var(--muted); }
+
+  /* ---------- 分页 ---------- */
+  .pager {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 32px;
+    flex-wrap: wrap;
+  }
+  .pager button {
+    background: var(--card);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .2s;
+    min-width: 38px;
+  }
+  .pager button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+  .pager button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #111;
+    font-weight: 600;
+  }
+  .pager button:disabled { opacity: .35; cursor: default; }
+  .pager-gap {
+    min-width: 20px;
+    text-align: center;
+    color: var(--muted);
+    align-self: center;
+    letter-spacing: 1px;
+  }
+  .pager-jump {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px;
+  }
+  .pager-jump input {
+    width: 64px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 8px;
+    font-size: 13px;
+    text-align: center;
+    outline: none;
+  }
+  .pager-jump input:focus { border-color: var(--accent); }
+  .pager-jump button { min-width: 0; }
+  .pager-info {
+    width: 100%;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 10px;
+  }
+
+  /* ---------- 筛选行 ---------- */
+  .filter-row {
+    max-width: 1200px;
+    margin: 16px auto 0;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .filter-row .tabs button { padding: 7px 16px; font-size: 14px; }
+  .filter-label { color: var(--muted); font-size: 14px; margin-left: 10px; }
+  .filter-row select {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 8px 12px;
+    outline: none;
+    cursor: pointer;
+  }
+  .filter-row select:focus { border-color: var(--accent); }
+  .reset-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .reset-btn:hover { color: #e05a4e; border-color: #e05a4e; }
+
+  /* ---------- 分区 ---------- */
+  main { max-width: 1200px; margin: 0 auto; padding: 0 24px 60px; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 36px 0 18px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .section-head h2 { font-size: 20px; letter-spacing: 1px; }
+  .section-head h2::before {
+    content: "";
+    display: inline-block;
+    width: 4px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 2px;
+    margin-right: 10px;
+    vertical-align: -3px;
+  }
+  .section-head .num { color: var(--muted); font-size: 13px; }
+  .section-empty { color: var(--muted); font-size: 14px; padding: 24px 0; }
+
+  /* ---------- 卡片网格 ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 26px;
+  }
+  .card {
+    position: relative;
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    color: var(--text);
+    cursor: pointer;
+    transition: transform .2s, border-color .2s, background .2s;
+  }
+  .card:hover {
+    transform: translateY(-5px);
+    border-color: var(--accent);
+    background: var(--card-hover);
+  }
+  .card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .poster {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .poster .initial {
+    font-size: 60px;
+    font-weight: 700;
+    color: rgba(255,255,255,.9);
+    text-shadow: 0 4px 16px rgba(0,0,0,.35);
+  }
+  .poster img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .badge {
+    position: absolute;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    z-index: 2;
+  }
+  /* 状态切换下拉（读过 / 想读） */
+  .status-select {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #0c0f14;
+    padding: 4px 24px 4px 10px;
+    cursor: pointer;
+    background-color: var(--watched);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6'%3E%3Cpath d='M0 0l4 6 4-6z' fill='%230c0f14'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+  }
+  .status-select.reading { background-color: var(--doing); }
+  .status-select.want { background-color: var(--want); }
+  .badge.rating {
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,.55);
+    color: var(--accent);
+    font-weight: 700;
+    backdrop-filter: blur(6px);
+  }
+  .badge.status { top: 10px; right: 10px; font-weight: 600; color: #0c0f14; }
+  .badge.status.read { background: var(--watched); }
+  .badge.status.reading { background: var(--doing); }
+  .badge.status.want { background: var(--want); }
+  .card-tools {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: none;
+    gap: 6px;
+    z-index: 3;
+  }
+  .card:hover .card-tools { display: flex; }
+  .card-tools button {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,.6);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    transition: background .2s;
+  }
+  .card-tools button:hover { background: var(--accent); color: #111; }
+  .info { padding: 13px 15px 15px; }
+  .title-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .title-cn { font-size: 15px; font-weight: 600; }
+  .title-year { color: var(--muted); font-size: 13px; }
+  .title-en {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 3px;
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .meta {
+    margin-top: 9px;
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .meta .label { color: var(--accent); font-size: 12px; margin-right: 6px; }
+  .meta .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .douban-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .card:hover .douban-hint { opacity: 1; }
+
+  .detail-modal {
+    max-width: 760px;
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,.55);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .detail-close:hover { background: var(--accent); color: #111; }
+  .detail-layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .detail-poster {
+    position: relative;
+    min-height: 360px;
+    background: #1a1f28;
+  }
+  .detail-poster img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .detail-poster .initial {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 72px;
+    font-weight: 700;
+    color: rgba(255,255,255,.9);
+  }
+  .detail-main { padding: 28px 28px 24px; }
+  .detail-kicker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .detail-chip {
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 3px 10px;
+    color: #0c0f14;
+  }
+  .detail-chip.read { background: var(--watched); }
+  .detail-chip.reading { background: var(--doing); }
+  .detail-chip.want { background: var(--want); }
+  .detail-chip.plain {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+  }
+  .detail-modal h3.detail-title {
+    font-size: 26px;
+    line-height: 1.3;
+    margin: 0;
+    padding-right: 28px;
+  }
+  .detail-year { color: var(--muted); font-size: 16px; font-weight: 500; margin-left: 8px; }
+  .detail-en {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 14px;
+    font-style: italic;
+  }
+  .detail-score {
+    margin-top: 14px;
+    color: var(--accent);
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .detail-rows { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .detail-row { font-size: 14px; color: var(--text); line-height: 1.6; }
+  .detail-row span { color: var(--accent); margin-right: 8px; }
+  .detail-actions { margin-top: 22px; }
+  .detail-douban {
+    display: inline-block;
+    background: var(--accent);
+    color: #111;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 14px;
+  }
+  .detail-douban:hover { filter: brightness(1.1); }
+  @media (max-width: 640px) {
+    .detail-layout { grid-template-columns: 1fr; }
+    .detail-poster { min-height: 220px; height: 240px; }
+  }
+  .empty-all { text-align: left; color: var(--muted); padding: 28px 0 24px; font-size: 15px; }
+
+  /* ---------- 添加按钮 ---------- */
+  .fab {
+    position: fixed;
+    right: 32px;
+    bottom: 108px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #111;
+    font-size: 30px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 6px 24px rgba(240,180,41,.4);
+    transition: transform .2s;
+    z-index: 50;
+  }
+  .fab:hover { transform: scale(1.08) rotate(90deg); }
+
+  /* ---------- 弹窗 ---------- */
+  .modal-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.6);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 520px;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 26px 28px;
+  }
+  .modal h3 { font-size: 18px; margin-bottom: 18px; }
+  #watchedReviewMask { z-index: 1100; }
+  .review-field { display: block; margin: 16px 0; }
+  .review-field input, .review-field textarea { display: block; width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  .review-stars { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .review-stars button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 28px; }
+  .review-stars button.selected { color: #e5a43b; }
+  .review-hint { color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+  /* 搜索添加视图 */
+  .status-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
+  .status-toggle button {
+    flex: 1;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 0;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .status-toggle button.active[data-status="read"] { border-color: var(--watched); color: var(--watched); }
+  .status-toggle button.active[data-status="reading"] { border-color: var(--doing); color: var(--doing); }
+  .status-toggle button.active[data-status="want"] { border-color: var(--want); color: var(--want); }
+  .search-box input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 14px;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-status { font-size: 13px; color: var(--muted); margin: 12px 2px; min-height: 18px; }
+  .search-status a { color: var(--accent); }
+  .result-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .result-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 12px 8px 8px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .result-item:hover { border-color: var(--accent); background: var(--card-hover); }
+  .result-item .thumb {
+    width: 54px;
+    height: 78px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: var(--line);
+    flex-shrink: 0;
+  }
+  .result-item .rbody { min-width: 0; flex: 1; }
+  .result-item .rtitle { font-size: 14px; font-weight: 600; }
+  .result-item .rsub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .result-item .rmeta { font-size: 12px; color: var(--text); margin-top: 3px; line-height: 1.5; }
+  .result-item .rmeta span { color: var(--accent); margin-right: 6px; }
+  .result-item .rintro {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: help;
+  }
+  .result-item .rintro:hover,
+  .result-item .rintro:focus-visible {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+    color: var(--text);
+  }
+  .result-item .rside {
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .result-item .rtype {
+    align-self: flex-end;
+    font-size: 12px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 10px;
+    flex-shrink: 0;
+  }
+  .rate-btn {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    z-index: 3;
+    border: none;
+    border-radius: 999px;
+    background: rgba(0,0,0,.62);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+  }
+  .rate-btn:hover { background: var(--accent); color: #111; }
+  .rdelete {
+    border: 1px solid #e05a4e;
+    background: transparent;
+    color: #e05a4e;
+    border-radius: 999px;
+    font-size: 12px;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  .rdelete:hover { background: #e05a4e; color: #fff; }
+  #rateMask { z-index: 1200; }
+  #rateMask .detail-year { display: block; margin: 6px 0 0; }
+  #rateMask .detail-poster { align-self: start; height: 360px; }
+  @media (max-width: 640px) {
+    #rateMask .detail-poster { height: 240px; }
+  }
+  #confirmMask { z-index: 1300; }
+  .rate-copy { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--text); }
+  .rate-copy span { color: var(--accent); margin-right: 8px; }
+  .rate-dialog-stars { display: flex; align-items: center; gap: 4px; margin-top: 14px; }
+  .rate-dialog-stars button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 30px; line-height: 1; padding: 0; }
+  .rate-dialog-stars button.on { color: #e5a43b; }
+  .rate-dialog-label { margin-top: 6px; color: var(--muted); font-size: 13px; }
+  .result-item.added { opacity: .65; cursor: default; }
+  .result-item.added .rtype { color: var(--watched); border-color: var(--watched); }
+  .switch-line {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .switch-line a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .switch-line a:hover { text-decoration: underline; }
+
+  /* 手动表单视图 */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-item { display: flex; flex-direction: column; gap: 6px; }
+  .form-item.full { grid-column: 1 / -1; }
+  .form-item label { font-size: 13px; color: var(--muted); }
+  .form-item label b { color: var(--accent); font-weight: 400; }
+  .form-item input, .form-item select {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .form-item input:focus, .form-item select:focus { border-color: var(--accent); }
+  .form-item .tip { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .modal-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+  .modal-btns button {
+    border-radius: 8px;
+    padding: 9px 22px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .btn-cancel { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+  .btn-cancel:hover { color: var(--text); }
+  .btn-save { background: var(--accent); border: none; color: #111; font-weight: 600; }
+  .btn-save:hover { filter: brightness(1.1); }
+  .btn-danger { background: #e05a4e; border: none; color: #fff; font-weight: 600; }
+  .btn-danger:hover { filter: brightness(1.1); }
+  .confirm-modal { max-width: 360px; }
+  #doubanImportMask .confirm-modal { max-width: 440px; }
+  #doubanImportStatus, #doubanLoginStatus { white-space: pre-line; line-height: 1.7; }
+  .douban-captcha { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .douban-captcha img { height: 40px; border-radius: 6px; background: #fff; }
+  .douban-code-row { display: flex; gap: 8px; }
+  .douban-code-row input { flex: 1; min-width: 0; }
+  .douban-code-row button { white-space: nowrap; padding: 9px 12px; }
+  #doubanMode { margin-top: 14px; }
+  #doubanMode button.active { border-color: var(--accent); color: var(--accent); }
+  .douban-sync-note { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .btn-line { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  .btn-line:hover { filter: brightness(1.1); }
+  #confirmMask .confirm-modal { max-width: 420px; }
+  .confirm-text { color: var(--muted); font-size: 14px; line-height: 1.7; }
+
+  /* 提示条 */
+  .toast {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--watched);
+    color: #0c0f14;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 22px;
+    border-radius: 999px;
+    opacity: 0;
+    transition: opacity .3s;
+    pointer-events: none;
+    z-index: 200;
+  }
+  .toast.show { opacity: 1; }
+
+  footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+    background: rgba(15, 17, 23, 0.94);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+  }
+  footer .footer-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 12px 24px;
+    text-align: left;
+  }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .search { width: 100%; margin-left: 0; }
+    header h1 { font-size: 26px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .fab { right: 20px; bottom: 108px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-block">
+    <h1>我的<span>书单</span></h1>
+    <p>记录读过的、在读的、想读的书 · 点击卡片查看详情</p>
+    <nav class="header-links" aria-label="快捷导航">
+      <a class="home-link" href="/personal/">返回个人工具</a>
+      <a class="home-link douban-shortcut" href="https://book.douban.com/" target="_blank" rel="noopener noreferrer">豆瓣读书 ↗</a>
+    </nav>
+  </div>
+  <div class="backup-btns">
+    <button id="loginBtn" type="button">登录</button>
+    <button id="changePasswordBtn" type="button">修改管理密码</button>
+    <button id="updateBtn" type="button">更新</button>
+    <button id="doubanImportBtn" type="button">豆瓣导入</button>
+    <button id="exportBtn" type="button">导出备份</button>
+    <button id="importBtn" type="button">导入</button>
+    <button id="clearBtn" type="button">清空</button>
+    <input type="file" id="importFile" accept=".json" style="display:none">
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="tabs" id="statusTabs">
+    <button data-status="all" class="active">全部</button>
+    <button data-status="read">读过</button>
+    <button data-status="reading">在读</button>
+    <button data-status="want">想读</button>
+  </div>
+  <input class="search" id="searchInput" placeholder="搜索书名 / 作者 / 译者">
+</div>
+
+<div class="filter-row">
+  <span class="filter-label">出版社</span>
+  <select id="regionFilter"><option value="all">全部</option></select>
+  <span class="filter-label">类型</span>
+  <select id="genreFilter"><option value="all">全部</option></select>
+  <span class="filter-label">年份</span>
+  <select id="decadeFilter"><option value="all">全部</option></select>
+  <span class="filter-label">排序</span>
+  <select id="sortFilter">
+    <option value="added">添加时间</option>
+    <option value="year">出版年份</option>
+    <option value="rating">豆瓣评分</option>
+  </select>
+  <button id="resetBtn" class="reset-btn">重置筛选</button>
+</div>
+
+<main id="main"></main>
+
+<button class="fab" id="addBtn" title="添加书籍">+</button>
+
+<!-- 弹窗 -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal">
+
+    <!-- 视图一：搜索添加 -->
+    <div id="searchView">
+      <h3>添加书籍</h3>
+      <div class="status-toggle" id="statusToggle">
+        <button data-status="read" class="active">读过</button>
+        <button data-status="reading">在读</button>
+        <button data-status="want">想读</button>
+      </div>
+      <div class="search-box">
+        <input id="doubanSearchInput" placeholder="输入书名或作者，自动搜索豆瓣" autocomplete="off">
+      </div>
+      <div class="search-status" id="searchStatus"></div>
+      <div class="result-list" id="resultList"></div>
+      <button type="button" id="searchMoreBtn" class="btn-cancel" hidden style="width:100%;margin-top:12px;padding:10px;cursor:pointer">加载更多</button>
+      <div class="switch-line">没找到想要的？<a id="toManualLink">手动填写 →</a></div>
+    </div>
+
+    <!-- 视图二：手动表单（也用于编辑） -->
+    <div id="formView" style="display:none">
+      <h3 id="formTitle">手动添加</h3>
+      <form id="bookForm" novalidate>
+        <div class="form-grid">
+          <div class="form-item">
+            <label>书名 <b>必填</b></label>
+            <input name="title" required placeholder="如：三体">
+          </div>
+          <div class="form-item">
+            <label>原名（外文书可不填）</label>
+            <input name="titleEn" placeholder="如：The Three-Body Problem">
+          </div>
+          <div class="form-item">
+            <label>出版年份</label>
+            <input name="year" type="number" min="1000" max="2100" placeholder="如：2008">
+          </div>
+          <div class="form-item">
+            <label>豆瓣评分（0-10）</label>
+            <input name="rating" type="number" min="0" max="10" step="0.1" placeholder="如：9.6">
+          </div>
+          <div class="form-item">
+            <label>状态</label>
+            <select name="status">
+              <option value="read">读过</option>
+              <option value="reading">在读</option>
+              <option value="want">想读</option>
+            </select>
+          </div>
+          <div class="form-item">
+            <label>作者</label>
+            <input name="author" placeholder="如：刘慈欣">
+          </div>
+          <div class="form-item">
+            <label>主要译者（多个用逗号分隔）</label>
+            <input name="translator" placeholder="如：刘宇昆，李昕">
+          </div>
+          <div class="form-item">
+            <label>出版社（多个用逗号分隔，用于筛选）</label>
+            <input name="publishers" placeholder="如：重庆出版社">
+          </div>
+          <div class="form-item">
+            <label>类型（多个用逗号分隔，用于筛选）</label>
+            <input name="genres" placeholder="如：科幻，小说">
+          </div>
+          <div class="form-item full">
+            <label>豆瓣链接</label>
+            <input name="douban" placeholder="https://book.douban.com/subject/2567698/">
+            <div class="tip">粘贴该书籍的豆瓣页面地址，点击卡片即可直达；不填则点击时自动按书名搜索</div>
+          </div>
+          <div class="form-item full">
+            <label>封面图链接</label>
+            <input name="poster" placeholder="https://img3.doubanio.com/view/photo/...">
+            <div class="tip">获取方法：打开豆瓣书籍页 → 右键封面图 → 复制图片地址；不填则显示书名首字封面</div>
+          </div>
+        </div>
+        <div class="modal-btns">
+          <button type="button" class="btn-cancel" id="backToSearchBtn">← 返回搜索</button>
+          <button type="submit" class="btn-save">保存</button>
+        </div>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<div class="modal-mask" id="doubanImportMask">
+  <div class="modal confirm-modal">
+    <h3>从豆瓣导入</h3>
+    <p class="confirm-text" id="doubanLoginHint">要登录你的豆瓣账号，才能读到登录后才看得到的片子。密码和短信验证码只用来登录，不会写进书单。</p>
+    <div class="status-toggle" id="doubanMode">
+      <button type="button" data-mode="phone" class="active">手机验证码</button>
+      <button type="button" data-mode="password">账号密码</button>
+    </div>
+    <form id="doubanLoginForm">
+      <div id="doubanPhonePane">
+        <div class="form-item">
+          <label>手机号</label>
+          <input id="doubanPhone" placeholder="11位手机号" inputmode="numeric" autocomplete="tel">
+        </div>
+        <div class="form-item">
+          <label>短信验证码</label>
+          <div class="douban-code-row">
+            <input id="doubanSms" placeholder="短信验证码" inputmode="numeric" autocomplete="one-time-code">
+            <button type="button" class="btn-cancel" id="doubanSendCode">获取验证码</button>
+          </div>
+        </div>
+      </div>
+      <div id="doubanPasswordPane" style="display:none">
+        <div class="form-item">
+          <label>豆瓣账号</label>
+          <input id="doubanAccount" placeholder="手机号或邮箱" autocomplete="username">
+        </div>
+        <div class="form-item">
+          <label>豆瓣密码</label>
+          <input id="doubanPassword" type="password" placeholder="豆瓣密码" autocomplete="current-password">
+        </div>
+      </div>
+      <div class="douban-captcha" id="doubanCaptchaBox" style="display:none">
+        <img id="doubanCaptchaImg" alt="验证码">
+        <input id="doubanCaptcha" placeholder="验证码" autocomplete="off">
+      </div>
+      <div class="search-status" id="doubanLoginStatus"></div>
+      <div class="modal-btns">
+        <button type="button" class="btn-cancel" id="doubanImportCancel">取消</button>
+        <button type="submit" class="btn-save" id="doubanLoginBtn">登录豆瓣</button>
+      </div>
+    </form>
+    <form id="doubanImportForm" style="display:none">
+      <p class="confirm-text" id="doubanWho"></p>
+      <div class="status-toggle" id="doubanStatusPick" style="margin-top:14px">
+        <button type="button" data-status="read" class="active">读过</button>
+        <button type="button" data-status="reading" class="active">在读</button>
+        <button type="button" data-status="want" class="active">想读</button>
+      </div>
+      <p class="douban-sync-note">开始导入只核对最新的。整理导入会把豆瓣上有、这里删掉的旧片补回来，比较慢。</p>
+      <div class="search-status" id="doubanImportStatus"></div>
+      <div class="modal-btns">
+        <button type="button" class="btn-cancel" id="doubanLogoutBtn">退出豆瓣</button>
+        <button type="button" class="btn-line" id="doubanTidyBtn">整理导入</button>
+        <button type="submit" class="btn-save" id="doubanImportSubmit">开始导入</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-mask" id="loginMask">
+  <div class="modal confirm-modal">
+    <h3>管理登录</h3>
+    <p class="confirm-text">访客只能查看。添加、修改、删除需要管理密码。</p>
+    <form id="loginForm">
+      <div class="form-item" style="margin-top:14px">
+        <label>管理密码</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="服务器上设置的密码">
+      </div>
+      <div class="search-status" id="loginError"></div>
+      <div class="modal-btns">
+        <button type="button" class="btn-cancel" id="loginCancel">取消</button>
+        <button type="submit" class="btn-save">登录</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 书籍详情 -->
+<div class="modal-mask" id="passwordMask">
+  <div class="modal confirm-modal" role="dialog" aria-labelledby="passwordTitle">
+    <h3 id="passwordTitle">修改书单管理密码</h3>
+    <p class="confirm-text">仅修改本书单的管理密码。密码长度和字符不限，不能为空；成功后所有设备退出，请用新密码重新登录。</p>
+    <form id="passwordForm">
+      <div class="form-item" style="margin-top:14px">
+        <label for="currentAdminPassword">当前管理密码</label>
+        <input id="currentAdminPassword" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="form-item">
+        <label for="newAdminPassword">新管理密码</label>
+        <input id="newAdminPassword" type="password" autocomplete="new-password" required>
+      </div>
+      <div class="form-item">
+        <label for="confirmAdminPassword">再次输入新密码</label>
+        <input id="confirmAdminPassword" type="password" autocomplete="new-password" required>
+      </div>
+      <div class="search-status" id="passwordError" role="alert"></div>
+      <div class="modal-btns">
+        <button type="button" class="btn-cancel" id="passwordCancel">取消</button>
+        <button type="submit" class="btn-save" id="passwordSave">修改密码</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 书籍详情 -->
+<div class="modal-mask" id="watchedReviewMask">
+  <form class="modal" id="watchedReviewForm" role="dialog" aria-modal="true" aria-labelledby="watchedReviewTitle">
+    <h3 id="watchedReviewTitle">添加到读过</h3>
+    <p class="review-hint">以下都可以不填，直接继续添加。</p>
+    <div class="review-field">我的评分
+      <div class="review-stars" role="group" aria-label="五星评分">
+        <button type="button" data-stars="1" aria-label="1星 很差">☆</button>
+        <button type="button" data-stars="2" aria-label="2星 较差">☆</button>
+        <button type="button" data-stars="3" aria-label="3星 还行">☆</button>
+        <button type="button" data-stars="4" aria-label="4星 推荐">☆</button>
+        <button type="button" data-stars="5" aria-label="5星 力荐">☆</button>
+        <button type="button" id="clearReviewRating" style="font-size:13px">清除</button>
+      </div>
+      <span id="reviewRatingLabel" class="review-hint">未评分</span>
+    </div>
+    <label class="review-field">标签（多个标签用空格分隔）<input id="reviewTags" autocomplete="off"></label>
+    <label class="review-field">简短评论（最多350字）<textarea id="reviewComment" rows="4"></textarea></label>
+    <div class="review-hint" id="reviewCommentCount">0 / 350</div>
+    <label class="review-field"><input type="checkbox" id="reviewPrivate" style="display:inline;width:auto;margin:0"> 仅豆瓣自己可见</label>
+    <p class="review-hint">个人书单及这里填写的评分、标签、短评仍会公开。</p>
+    <div class="modal-btns"><button type="button" class="btn-cancel" id="cancelWatchedReview">取消</button><button type="submit" class="btn-save">继续添加到读过</button></div>
+  </form>
+</div>
+
+<div class="modal-mask" id="rateMask">
+  <div class="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="rateTitle">
+    <button type="button" class="detail-close" id="rateClose" aria-label="关闭">✕</button>
+    <div class="detail-layout" id="rateBody"></div>
+  </div>
+</div>
+
+<div class="modal-mask" id="detailMask">
+  <div class="modal detail-modal" role="dialog" aria-labelledby="detailTitle">
+    <button type="button" class="detail-close" id="detailClose" aria-label="关闭">✕</button>
+    <div class="detail-layout" id="detailBody"></div>
+  </div>
+</div>
+
+<!-- 删除确认弹窗 -->
+<div class="modal-mask" id="confirmMask">
+  <div class="modal confirm-modal">
+    <h3>删除确认</h3>
+    <p class="confirm-text" id="confirmText"></p>
+    <div class="modal-btns">
+      <button type="button" class="btn-cancel" id="confirmCancel">取消</button>
+      <button type="button" class="btn-cancel" id="confirmAlt" style="display:none">只加在这里</button>
+      <button type="button" class="btn-danger" id="confirmOk">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-inner">
+    书单存在服务器上，访客只能查看。换电脑前仍可以用「导出备份」留一份到本地<br>
+    搜索结果、封面与评分数据来自豆瓣
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ==================== 数据层 ==================== */
+  // 正式站点走阿里云；用 server.py 打开页面时走同一地址；本地预览主页时走本机 8003。
+  var TOKEN_KEY = "book-tracker-token";
+  var REMOTE_API = "https://47.103.222.155:5004";
+
+  function apiOrigin() {
+    if (location.port === "8003") return "";
+    if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+      return "http://127.0.0.1:8003";
+    }
+    return REMOTE_API;
+  }
+
+  var items = [];
+  var isAdmin = false;
+  var loaded = false;
+  var loadError = "";
+  var saving = false;
+  var lastSearchList = [];
+  var lastSearchKeyword = "";
+  var rateItemId = "";
+
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = {};
+    var token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers.Authorization = "Bearer " + token;
+    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    return fetch(apiOrigin() + path, {
+      method: opts.method || "GET",
+      headers: headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        if (resp.status === 401) {
+          if (path !== "/api/login" && localStorage.getItem(TOKEN_KEY)) setLoggedIn(false);
+          var err = new Error((data && data.error) || "请先登录");
+          err.status = 401;
+          throw err;
+        }
+        if (!resp.ok) {
+          var err2 = new Error((data && data.error) || "请求失败");
+          err2.status = resp.status;
+          throw err2;
+        }
+        return data;
+      });
+    });
+  }
+
+  function setLoggedIn(on) {
+    isAdmin = !!on;
+    if (!on) localStorage.removeItem(TOKEN_KEY);
+    document.body.classList.toggle("is-admin", isAdmin);
+    var btn = document.getElementById("loginBtn");
+    if (btn) {
+      btn.textContent = isAdmin ? "退出" : "登录";
+      btn.classList.toggle("on", isAdmin);
+    }
+    if (loaded) render();
+  }
+
+  function applyList(data) {
+    if (data && Array.isArray(data.items)) items = data.items;
+    loaded = true;
+    loadError = "";
+    render();
+    refreshSearchResults();
+  }
+
+  function loadMovies() {
+    return api("/api/books").then(function (data) {
+      items = Array.isArray(data) ? data : [];
+      loaded = true;
+      loadError = "";
+      render();
+      refreshSearchResults();
+    }).catch(function () {
+      items = [];
+      loaded = true;
+      loadError = "书单服务暂时连不上";
+      render();
+    });
+  }
+
+  function mustAdmin() {
+    if (!isAdmin) { toast("请先登录"); return false; }
+    if (saving) return false;
+    return true;
+  }
+
+  /* ==================== 状态 ==================== */
+  var curStatus = "all";
+  var curRegion = "all";
+  var curGenre = "all";
+  var curDecade = "all";
+  var curSort = "added";
+  var curPage = 1;
+  var PAGE_SIZE = 15;   // 每页 5 列 × 3 行
+  var keyword = "";
+  var editingId = null;
+  var addStatus = "read";   // 搜索添加时的状态选择
+
+  var mainEl = document.getElementById("main");
+
+  /* ==================== 工具函数 ==================== */
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function posterStyle(title) {
+    var h = 0;
+    for (var i = 0; i < title.length; i++) {
+      h = (h * 31 + title.charCodeAt(i)) % 360;
+    }
+    return "linear-gradient(135deg, hsl(" + h + ",45%,32%), hsl(" + ((h + 40) % 360) + ",50%,18%))";
+  }
+
+  // 豆瓣图片需要服务器中转时的备用地址（标记在 data-relay 上）
+  function posterUrl(url) {
+    var match = String(url || "").match(/\/(p\d+)\.(?:jpg|jpeg|webp|png)/i);
+    if (!match || !/douban(?:io)?\.com/i.test(url)) return url || "";
+    return "https://img3.doubanio.com/view/photo/m_ratio_poster/public/" + match[1] + ".jpg";
+  }
+
+  function relayAttr(src) {
+    return /doubanio\.com|douban\.com/.test(src) ? ' data-relay="' + esc(src) + '"' : "";
+  }
+
+  // 图片加载失败时：先试 Python 中转，再试 PHP 中转，最后降级为渐变封面
+  window.imgErr = function (img) {
+    var orig = img.getAttribute("data-relay");
+    if (!orig) { img.style.visibility = "hidden"; return; }
+    if (img.getAttribute("data-stage") === "1") {
+      img.style.visibility = "hidden";
+      return;
+    }
+    img.setAttribute("data-stage", "1");
+    img.src = apiOrigin() + "/api/img?url=" + encodeURIComponent(orig);
+  };
+
+  function doubanUrl(item) {
+    if (item.douban) return item.douban;
+    return "https://book.douban.com/subject_search?search_text=" +
+           encodeURIComponent(item.title) + "&cat=1002";
+  }
+
+  function match(item) {
+    if (curStatus !== "all" && item.status !== curStatus) return false;
+    return matchFilters(item);
+  }
+
+  function matchFilters(item) {
+    if (curRegion !== "all" && (!item.publishers || item.publishers.indexOf(curRegion) === -1)) return false;
+    if (curGenre !== "all" && (!item.genres || item.genres.indexOf(curGenre) === -1)) return false;
+    if (curDecade !== "all") {
+      var y = parseInt(item.year, 10) || 0;
+      if (curDecade === "0") {
+        if (y >= 1990) return false;
+      } else if (curDecade.charAt(4) === "s") {   // 形如 "2010s" 的整年代
+        var d = parseInt(curDecade, 10);
+        if (y < d || y > d + 9) return false;
+      } else {
+        if (String(y) !== curDecade) return false; // 单年精确匹配
+      }
+    }
+    if (keyword) {
+      var hay = (item.title + " " + (item.titleEn || "") + " " +
+                 (item.author || "") + " " + (item.translator || []).join(" ")).toLowerCase();
+      if (hay.indexOf(keyword) === -1) return false;
+    }
+    return true;
+  }
+
+  function toast(msg, ms) {
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.classList.remove("show"); }, ms || 1800);
+  }
+
+  /* ==================== 渲染 ==================== */
+  function statusName(status) {
+    if (status === "read") return "读过";
+    if (status === "reading") return "在读";
+    return "想读";
+  }
+
+  function cardHtml(item) {
+    var statusCls = item.status === "want" ? "want" : (item.status === "reading" ? "reading" : "read");
+    var ratingBadge = (item.rating !== undefined && item.rating !== "" && item.rating !== null)
+      ? '<span class="badge rating">★ ' + esc(item.rating) + '</span>' : "";
+    var poster = posterUrl(item.poster);
+    var posterImg = poster
+      ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' loading="lazy" alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var rateControl = "";
+    if (isAdmin && item.status === "read") {
+      var mine = Number(item.personalRating) || 0;
+      rateControl = '<button type="button" class="rate-btn">' + (mine ? "评分 " + mine + " 星" : "评分") + "</button>";
+    }
+
+    return '' +
+    '<div class="card" role="button" tabindex="0" aria-label="' + esc(item.title) + '" data-id="' + esc(item.id) + '">' +
+      '<div class="poster" style="background:' + posterStyle(item.title) + '">' +
+        '<span class="initial">' + esc(item.title.charAt(0)) + '</span>' +
+        posterImg +
+        (isAdmin
+          ? '<select class="status-select ' + statusCls + '" title="点击切换读过 / 在读 / 想读">' +
+              '<option value="read"' + (item.status === "read" ? " selected" : "") + '>读过</option>' +
+              '<option value="reading"' + (item.status === "reading" ? " selected" : "") + '>在读</option>' +
+              '<option value="want"' + (item.status === "want" ? " selected" : "") + '>想读</option>' +
+            '</select>' +
+            '<div class="card-tools">' +
+              '<button type="button" class="edit-btn" title="编辑">✎</button>' +
+              '<button type="button" class="del-btn" title="删除">✕</button>' +
+            '</div>'
+          : '<span class="badge status ' + statusCls + '">' + statusName(item.status) + '</span>') +
+        ratingBadge +
+        rateControl +
+      '</div>' +
+      '<div class="info">' +
+        '<div class="title-row">' +
+          '<span class="title-cn">' + esc(item.title) + '</span>' +
+          (item.year ? '<span class="title-year">' + esc(item.year) + '</span>' : '') +
+        '</div>' +
+        (item.titleEn ? '<div class="title-en">' + esc(item.titleEn) + '</div>' : '') +
+        '<div class="meta">' +
+          (item.author ? '<div class="line"><span class="label">作者</span>' + esc(item.author) + '</div>' : '') +
+          ((item.translator && item.translator.length) ? '<div class="line"><span class="label">主演</span>' + esc(item.translator.join(" / ")) + '</div>' : '') +
+          (((item.publishers && item.publishers.length) || (item.genres && item.genres.length)) ?
+            '<div class="line"><span class="label">出版社/类型</span>' + esc((item.publishers || []).concat(item.genres || []).join(" / ")) + '</div>' : '') +
+        '</div>' +
+        '<div class="douban-hint">查看详情</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* pageNumbers */
+  function pageNumbers(pages, current) {
+    var keep = {};
+    function add(n) {
+      if (n >= 1 && n <= pages) keep[n] = true;
+    }
+    add(1);
+    add(pages);
+    add(current - 1);
+    add(current);
+    add(current + 1);
+    var nums = Object.keys(keep).map(Number).sort(function (a, b) { return a - b; });
+    var out = [];
+    nums.forEach(function (n, i) {
+      if (i > 0 && n - nums[i - 1] > 1) out.push("…");
+      out.push(n);
+    });
+    return out;
+  }
+  /* end pageNumbers */
+
+  function pagerHtml(pages) {
+    if (pages <= 1) return "";
+    var html = '<div class="pager">';
+    html += '<button type="button" data-p="prev"' + (curPage === 1 ? " disabled" : "") + '>上一页</button>';
+    pageNumbers(pages, curPage).forEach(function (item) {
+      if (item === "…") html += '<span class="pager-gap">…</span>';
+      else html += '<button type="button" data-p="' + item + '"' + (item === curPage ? ' class="active"' : "") + '>' + item + '</button>';
+    });
+    html += '<button type="button" data-p="next"' + (curPage === pages ? " disabled" : "") + '>下一页</button>';
+    html += '<form class="pager-jump">' +
+      '<input type="number" min="1" max="' + pages + '" inputmode="numeric" placeholder="页码" aria-label="跳转页码">' +
+      '<button type="submit">跳转</button></form>';
+    html += '</div>';
+    return html;
+  }
+
+  // 根据现有书单动态生成 出版社 / 类型 筛选项
+  var regionFilter = document.getElementById("regionFilter");
+  var genreFilter = document.getElementById("genreFilter");
+
+  function fillSelect(sel, options, curVal) {
+    sel.innerHTML = '<option value="all">全部</option>' + options.map(function (o) {
+      return '<option value="' + esc(o) + '"' + (o === curVal ? " selected" : "") + '>' + esc(o) + '</option>';
+    }).join("");
+  }
+
+  function buildFilterOptions() {
+    var publishers = [], genres = [];
+    items.forEach(function (m) {
+      (m.publishers || []).forEach(function (r) { if (publishers.indexOf(r) === -1) publishers.push(r); });
+      (m.genres || []).forEach(function (g) { if (genres.indexOf(g) === -1) genres.push(g); });
+    });
+    publishers.sort(); genres.sort();
+    if (curRegion !== "all" && publishers.indexOf(curRegion) === -1) curRegion = "all";
+    if (curGenre !== "all" && genres.indexOf(curGenre) === -1) curGenre = "all";
+    fillSelect(regionFilter, publishers, curRegion);
+    fillSelect(genreFilter, genres, curGenre);
+
+    // 年份筛选：最近 10 年单年列出，更早的按年代
+    var now = new Date().getFullYear();
+    var html = '<option value="all">全部</option>';
+    for (var y = now; y >= now - 9; y--) {
+      var ys = String(y);
+      html += '<option value="' + ys + '"' + (ys === curDecade ? " selected" : "") + '>' + y + '年</option>';
+    }
+    [["2010s", "2010年代"], ["2000s", "2000年代"], ["1990s", "1990年代"], ["0", "更早"]].forEach(function (p) {
+      html += '<option value="' + p[0] + '"' + (p[0] === curDecade ? " selected" : "") + '>' + p[1] + '</option>';
+    });
+    document.getElementById("decadeFilter").innerHTML = html;
+  }
+
+  function render() {
+    if (!loaded) {
+      mainEl.innerHTML = '<div class="empty-all">书单加载中…</div>';
+      return;
+    }
+    if (loadError) {
+      mainEl.innerHTML = '<div class="empty-all">' + esc(loadError) + '</div>';
+      renderCounts();
+      return;
+    }
+    buildFilterOptions();
+    var list = items.filter(match);
+    sortMovies(list);
+
+    if (!list.length) {
+      var emptyText = items.length
+        ? "没有符合筛选的书籍"
+        : (isAdmin ? "这里空空如也，点击右下角 + 添加第一部吧" : "还没有书单。点右上角「登录」，或点右下角 +");
+      mainEl.innerHTML = '<div class="empty-all">' + emptyText + '</div>';
+    } else {
+      var pages = Math.ceil(list.length / PAGE_SIZE);
+      if (curPage > pages) curPage = pages;
+      var start = (curPage - 1) * PAGE_SIZE;
+      var pageItems = list.slice(start, start + PAGE_SIZE);
+      mainEl.innerHTML =
+        '<div class="grid">' + pageItems.map(cardHtml).join("") + '</div>' +
+        pagerHtml(pages) +
+        (pages > 1 ? '<div class="pager-info">共 ' + list.length + ' 部 · 第 ' + curPage + ' / ' + pages + ' 页</div>' : "");
+    }
+    renderCounts();
+  }
+
+  function sortMovies(list) {
+    // The API appends new entries and preserves their positions on edits/imports.
+    if (curSort === "added") return list.reverse();
+    return list.sort(function (a, b) {
+      if (curSort === "rating") {
+        var ar = parseFloat(a.rating);
+        var br = parseFloat(b.rating);
+        if (isNaN(ar)) ar = -1;
+        if (isNaN(br)) br = -1;
+        if (br !== ar) return br - ar;
+      }
+      return (b.year || 0) - (a.year || 0);
+    });
+
+  }
+
+  function renderCounts() {
+    var filtered = items.filter(matchFilters);
+    var counts = { all: filtered.length, read: 0, reading: 0, want: 0 };
+    filtered.forEach(function (m) { counts[m.status] = (counts[m.status] || 0) + 1; });
+    document.querySelectorAll("#statusTabs button").forEach(function (btn) {
+      var s = btn.getAttribute("data-status");
+      var names = { all: "全部", read: "读过", reading: "在读", want: "想读" };
+      btn.innerHTML = (names[s] || "想读") + '<span class="count">' + (counts[s] || 0) + '</span>';
+    });
+  }
+
+  /* ==================== 弹窗 ==================== */
+  var mask = document.getElementById("modalMask");
+  var form = document.getElementById("bookForm");
+  var searchView = document.getElementById("searchView");
+  var formView = document.getElementById("formView");
+  var formTitle = document.getElementById("formTitle");
+  var doubanSearchInput = document.getElementById("doubanSearchInput");
+  var searchStatus = document.getElementById("searchStatus");
+  var resultList = document.getElementById("resultList");
+
+  function showSearchView() {
+    searchView.style.display = "";
+    formView.style.display = "none";
+  }
+  function showFormView(title) {
+    searchView.style.display = "none";
+    formView.style.display = "";
+    formTitle.textContent = title;
+  }
+
+  var openAddAfterLogin = false;
+
+  function openLogin() {
+    loginError.textContent = "";
+    document.getElementById("loginPassword").value = "";
+    loginMask.classList.add("show");
+    setTimeout(function () { document.getElementById("loginPassword").focus(); }, 50);
+  }
+
+  function openModal() {
+    if (!isAdmin) {
+      openAddAfterLogin = true;
+      openLogin();
+      return;
+    }
+    editingId = null;
+    showSearchView();
+    resultList.innerHTML = "";
+    searchStatus.textContent = "";
+    doubanSearchInput.value = "";
+    resetSearch("");
+    mask.classList.add("show");
+    setTimeout(function () { doubanSearchInput.focus(); }, 50);
+  }
+
+  function openEditModal(item) {
+    if (!mustAdmin()) return;
+    editingId = item.id;
+    showFormView("编辑书籍");
+    form.reset();
+    form.title.value = item.title || "";
+    form.titleEn.value = item.titleEn || "";
+    form.year.value = item.year || "";
+    form.rating.value = (item.rating === undefined || item.rating === null) ? "" : item.rating;
+    form.status.value = item.status || "read";
+    form.author.value = item.author || "";
+    form.translator.value = (item.translator || []).join("，");
+    form.publishers.value = (item.publishers || []).join("，");
+    form.genres.value = (item.genres || []).join("，");
+    form.douban.value = item.douban || "";
+    form.poster.value = item.poster || "";
+    mask.classList.add("show");
+  }
+
+  function closeModal() {
+    mask.classList.remove("show");
+    editingId = null;
+  }
+
+  document.getElementById("addBtn").addEventListener("click", openModal);
+  document.getElementById("backToSearchBtn").addEventListener("click", function () {
+    if (editingId) { closeModal(); } else { showSearchView(); }
+  });
+  document.getElementById("toManualLink").addEventListener("click", function () {
+    showFormView("手动添加");
+    form.reset();
+    form.title.value = doubanSearchInput.value.trim();
+    form.status.value = addStatus;
+  });
+  mask.addEventListener("click", function (e) { if (e.target === mask) closeModal(); });
+
+  // 搜索视图的状态切换
+  document.getElementById("statusToggle").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    addStatus = btn.getAttribute("data-status");
+    this.querySelectorAll("button").forEach(function (b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    // 新增：搜索结果已显示时，提示文字同步跟随切换
+    if (resultList.children.length) {
+      searchStatus.textContent = "点一下就加入「" + statusName(addStatus) + "」：";
+    }
+  });
+
+  /* ==================== 豆瓣搜索 ==================== */
+  // 依次尝试：自己服务器上的中转（最稳）→ 公共代理（国内网络下可能被拦）
+  function peopleText(text) {
+    return String(text || "").split(/\s+/).filter(Boolean).join(" / ");
+  }
+
+  function parseCardSubtitle(text) {
+    var parts = String(text || "").split("/").map(function (part) { return part.trim(); }).filter(Boolean);
+    // 豆瓣把国籍单独放一段（"[哥伦比亚] / 加西亚·马尔克斯 / 2011 / ..."），先粘回作者名
+    var merged = [];
+    parts.forEach(function (part) {
+      if (merged.length && /^\[[^\]]*\]$/.test(merged[merged.length - 1])) {
+        merged[merged.length - 1] = merged[merged.length - 1] + " " + part;
+      } else {
+        merged.push(part);
+      }
+    });
+    parts = merged;
+    var yearIndex = -1;
+    for (var i = 0; i < parts.length; i += 1) {
+      if (/^(?:19|20)\d{2}$/.test(parts[i])) { yearIndex = i; break; }
+    }
+    if (yearIndex < 0) {
+      return { author: parts[0] || "", translator: "", publishers: [], genres: [], year: "" };
+    }
+    return {
+      author: yearIndex >= 1 ? parts[0] : "",
+      translator: yearIndex >= 2 ? parts[1] : "",
+      publishers: parts[yearIndex + 1] ? [parts[yearIndex + 1]] : [],
+      genres: [],
+      year: parts[yearIndex]
+    };
+  }
+
+  function normalizeSuggest(data) {
+    if (Array.isArray(data)) return data;
+    var items = data && data.items;
+    if (!Array.isArray(items)) return [];
+    return items.map(function (item) {
+      var target = item && item.target;
+      var kind = item && item.target_type;
+      if (!target || !target.id || kind !== "book") return null;
+      var extra = parseCardSubtitle(target.card_subtitle);
+      return {
+        title: target.title || "",
+        year: extra.year,
+        img: target.cover_url || "",
+        url: "https://book.douban.com/subject/" + target.id + "/",
+        author: extra.author,
+        translator: extra.translator,
+        publishers: extra.publishers,
+        genres: extra.genres,
+        rating: (target.rating && target.rating.value) || "",
+        intro: target.abstract || ""
+      };
+    }).filter(Boolean);
+  }
+
+  function normalizeSearchPage(data, start) {
+    if (data && Array.isArray(data.results)) return data;
+    if (!data || !Array.isArray(data.items)) throw new Error("搜索接口尚未更新");
+    var next = start + data.items.length;
+    return { results: normalizeSuggest(data), nextStart: next,
+      hasMore: data.items.length > 0 && (typeof data.total === "number" ? next < data.total : data.items.length >= 10) };
+  }
+
+  function doubanSearch(kw, start) {
+    start = start || 0;
+    var q = encodeURIComponent(kw);
+    var rexxar = "https://m.douban.com/rexxar/api/v2/search/book?q=" + q + "&count=10&start=" + start;
+    var sources = [
+      apiOrigin() + "/api/suggest?q=" + q + "&start=" + start,
+      "https://api.allorigins.win/raw?url=" + encodeURIComponent(rexxar),
+      "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(rexxar)
+    ];
+    var index = 0;
+    function step() {
+      if (index >= sources.length) return Promise.reject(new Error("搜索暂时不可用，请稍后重试"));
+      var url = sources[index];
+      index += 1;
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 10000);
+      return fetch(url, { signal: controller.signal }).then(function (resp) {
+        clearTimeout(timer);
+        if (!resp.ok) throw new Error("http " + resp.status);
+        return resp.json();
+      }).then(function (data) {
+        return normalizeSearchPage(data, start);
+      }).catch(function () {
+        clearTimeout(timer);
+        return step();
+      });
+    }
+    return step();
+  }
+
+  var searchSeq = 0;
+  var searchTimer = null;
+  var searchMoreBtn = document.getElementById("searchMoreBtn");
+  var searchNextStart = 0;
+  var searchHasMore = false;
+  var searchLoading = false;
+
+  function resetSearch(kw) {
+    clearTimeout(searchTimer);
+    searchSeq += 1;
+    lastSearchList = [];
+    lastSearchKeyword = kw;
+    searchNextStart = 0;
+    searchHasMore = false;
+    searchLoading = false;
+    resultList.innerHTML = "";
+    updateSearchMore();
+  }
+
+  function updateSearchMore() {
+    searchMoreBtn.hidden = !searchHasMore;
+    searchMoreBtn.disabled = searchLoading;
+    searchMoreBtn.textContent = searchLoading ? "加载中…" : "加载更多";
+  }
+
+  function appendSearchPage(page, kw) {
+    var seen = new Set(lastSearchList.map(function (item) { return item.url; }));
+    var combined = lastSearchList.slice();
+    page.results.forEach(function (item) {
+      if (!seen.has(item.url)) { seen.add(item.url); combined.push(item); }
+    });
+    searchHasMore = page.hasMore && page.nextStart > searchNextStart;
+    searchNextStart = page.nextStart;
+    renderSearchResults(combined, kw);
+  }
+
+  searchMoreBtn.addEventListener("click", function () {
+    if (searchLoading || !searchHasMore) return;
+    var seq = searchSeq;
+    var kw = lastSearchKeyword;
+    searchLoading = true;
+    updateSearchMore();
+    doubanSearch(kw, searchNextStart).then(function (page) {
+      if (seq !== searchSeq) return;
+      appendSearchPage(page, kw);
+    }).catch(function () {
+      if (seq !== searchSeq) return;
+      searchStatus.textContent = "加载失败，已显示的结果保留，请点击加载更多重试。";
+    }).finally(function () {
+      if (seq !== searchSeq) return;
+      searchLoading = false;
+      updateSearchMore();
+    });
+  });
+
+  doubanSearchInput.addEventListener("input", function () {
+    var kw = this.value.trim();
+    resetSearch(kw);
+    var seq = searchSeq;
+    if (!kw) {
+      resultList.innerHTML = "";
+      searchStatus.textContent = "";
+      return;
+    }
+    searchStatus.textContent = "搜索中…";
+    searchTimer = setTimeout(function () {
+      doubanSearch(kw, 0).then(function (page) {
+        if (seq !== searchSeq) return; // 已过期
+        appendSearchPage(page, kw);
+        updateSearchMore();
+      }).catch(function () {
+        if (seq !== searchSeq) return;
+        resultList.innerHTML = "";
+        searchStatus.innerHTML = '自动搜索暂时不可用，请确认阿里云上的书单服务已启动。也可以点下方「手动填写」，或 ' +
+          '<a href="https://www.douban.com/search?cat=1002&q=' + encodeURIComponent(kw) +
+          '" target="_blank" rel="noopener">去豆瓣搜一下</a> 再回来填';
+      });
+    }, 350);
+  });
+
+  function renderSearchResults(list, kw) {
+    lastSearchList = list;
+    lastSearchKeyword = kw;
+    if (!list.length) {
+      resultList.innerHTML = "";
+      searchStatus.textContent = searchHasMore ? "本页暂无可添加的书籍，可以继续加载更多。" : "豆瓣上没有找到「" + kw + "」相关的结果";
+      return;
+    }
+    searchStatus.textContent = "点一下就加入「" + statusName(addStatus) + "」：";
+    resultList.innerHTML = list.map(function (r, i) {
+      var listed = listedMovie(r);
+      var bits = [r.year, r.publishers, r.genres].filter(Boolean);
+      return '<div class="result-item' + (listed ? ' added' : '') + '" data-i="' + i + '"' +
+        (listed ? ' aria-disabled="true" title="书单中已有这部书籍"' : '') + '>' +
+        (r.img ? '<img class="thumb" src="' + esc(r.img) + '"' + relayAttr(r.img) + ' referrerpolicy="no-referrer" onerror="imgErr(this)">' : '<div class="thumb"></div>') +
+        '<div class="rbody">' +
+          '<div class="rtitle">' + esc(r.title) + '</div>' +
+          (bits.length ? '<div class="rsub">' + esc(bits.join(" · ")) + '</div>' : '') +
+          (r.author ? '<div class="rmeta"><span>作者</span>' + esc(r.author) + '</div>' : '') +
+          (r.translator ? '<div class="rmeta"><span>主演</span>' + esc(r.translator) + '</div>' : '') +
+          (r.intro ? '<div class="rintro" tabindex="0" title="停留查看完整简介">' + esc(r.intro) + '</div>' : '') +
+        '</div>' +
+        '<div class="rside">' +
+          '<span class="rtype">' + (listed ? "已添加过 · " + statusName(listed.status) : "未添加") + '</span>' +
+          (listed ? '<button type="button" class="rdelete">删除</button>' : '') +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    // 点击结果 = 直接添加；已在书单里的可以删除
+    resultList.querySelectorAll(".result-item").forEach(function (el, i) {
+      el.addEventListener("click", function (event) {
+        var r = list[i];
+        if (!r) return;
+        if (event && event.target && event.target.closest && event.target.closest(".rdelete")) {
+          var listedItem = listedMovie(r);
+          if (listedItem && mustAdmin()) askDelete(listedItem);
+          return;
+        }
+        if (listedMovie(r)) { toast("书单中已添加过《" + r.title + "》"); return; }
+        if (!mustAdmin()) return;
+        var item = {
+          title: r.title || "",
+          titleEn: "",
+          year: r.year ? parseInt(r.year, 10) : "",
+          status: addStatus,
+          author: "",
+          translator: [],
+          publishers: [],
+          genres: [],
+          rating: "",
+          douban: (r.url || "").split("?")[0],
+          poster: posterUrl(r.img) || ""
+        };
+        addMovie(item, el);
+      });
+    });
+  }
+
+  /* ==================== 手动表单（添加 / 编辑） ==================== */
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var title = form.title.value.trim();
+    if (!title) { form.title.focus(); return; }
+
+    var data = {
+      title: title,
+      titleEn: form.titleEn.value.trim(),
+      year: form.year.value ? parseInt(form.year.value, 10) : "",
+      rating: form.rating.value === "" ? "" : parseFloat(form.rating.value),
+      status: form.status.value,
+      author: form.author.value.trim(),
+      translator: form.translator.value.split(/[,，、\/]/).map(function (s) { return s.trim(); }).filter(Boolean),
+      publishers: form.publishers.value.split(/[,，、\/]/).map(function (s) { return s.trim(); }).filter(Boolean),
+      genres: form.genres.value.split(/[,，、\/]/).map(function (s) { return s.trim(); }).filter(Boolean),
+      douban: form.douban.value.trim(),
+      poster: form.poster.value.trim()
+    };
+
+    if (!mustAdmin()) return;
+    if (editingId) {
+      var id = editingId;
+      saving = true;
+      api("/api/books/" + encodeURIComponent(id), { method: "PUT", body: data }).then(function (res) {
+        saving = false;
+        closeModal();
+        applyList(res);
+        toast("已保存修改");
+      }).catch(function (err) {
+        saving = false;
+        toast(err.message || "保存失败");
+      });
+      return;
+    }
+    addMovie(data, null);
+  });
+
+  var pendingDoubanAdd = null;
+
+  function doubanSubjectId(url) {
+    var match = String(url || "").match(/subject\/(\d+)/);
+    return match ? match[1] : "";
+  }
+
+  function listedMovie(result) {
+    var sid = doubanSubjectId(result.url || result.douban);
+    var kind = result.type || (result.episode && result.episode !== "0" ? "tv" : "movie");
+    return items.find(function (item) {
+      var itemSid = doubanSubjectId(item.douban);
+      if (sid && itemSid) return sid === itemSid;
+      // Entries added manually without a Douban link can still be recognized by title + year.
+      return String(item.title || "").trim() === String(result.title || "").trim() &&
+        String(item.year || "") === String(result.year || "");
+    });
+  }
+
+  function refreshSearchResults() {
+    if (resultList && lastSearchList.length && doubanSearchInput.value.trim() === lastSearchKeyword) {
+      renderSearchResults(lastSearchList, lastSearchKeyword);
+    }
+  }
+
+  function finishAdd(res, data, el, note) {
+    saving = false;
+    applyList(res);
+    var rating = res.item && res.item.rating !== "" && res.item.rating != null ? "，豆瓣 " + res.item.rating : "";
+    var syncNote = note || "";
+    if (!syncNote && res.doubanSync && res.doubanSync.skipped) {
+      syncNote = "。「" + statusName(res.doubanSync.status) + "」里已经有这部，没有再写进豆瓣";
+    } else if (!syncNote && res.doubanSync && res.doubanSync.ok) syncNote = "，已同步到豆瓣「" + statusName(data.status) + "」";
+    else if (!syncNote && res.doubanSync && res.doubanSync.ok === false) syncNote = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+    if (el) {
+      el.classList.add("added");
+      var tag = el.querySelector(".rtype");
+      if (tag) tag.textContent = "已添加";
+    } else {
+      closeModal();
+    }
+    toast("已添加《" + data.title + "》" + rating + syncNote, syncNote.indexOf("写进豆瓣") === -1 ? 2200 : 4200);
+  }
+
+  function postMovie(data, sync, el, note) {
+    saving = true;
+    api("/api/books", { method: "POST", body: Object.assign({}, data, { syncDouban: !!sync }) }).then(function (res) {
+      finishAdd(res, data, el, note);
+    }).catch(function (err) {
+      saving = false;
+      toast(err.message || "添加失败");
+    });
+  }
+
+  function openDoubanLoginForAdd(message) {
+    doubanLoginStatus.textContent = message || "登录后会把刚才那部写进豆瓣";
+    showDoubanLogin();
+    doubanImportMask.classList.add("show");
+    setTimeout(function () { document.getElementById("doubanPhone").focus(); }, 50);
+  }
+
+  function listedCopy(data) {
+    var sid = doubanSubjectId(data.douban);
+    if (!sid) return null;
+    for (var i = 0; i < items.length; i++) {
+      if (doubanSubjectId(items[i].douban) === sid) return items[i];
+    }
+    return null;
+  }
+
+  function addMovie(data, el) {
+    if (!mustAdmin() || saving) return;
+    if (el && data.status === "read" && !listedCopy(data)) {
+      openWatchedReview(data, el);
+      return;
+    }
+    continueAddMovie(data, el);
+  }
+
+  var pendingWatchedReview = null;
+  var reviewRating = "";
+  var watchedReviewMask = document.getElementById("watchedReviewMask");
+  var reviewComment = document.getElementById("reviewComment");
+
+  function setReviewRating(value) {
+    reviewRating = value;
+    watchedReviewMask.querySelectorAll("[data-stars]").forEach(function (button) {
+      var selected = Number(button.dataset.stars) <= Number(value);
+      button.textContent = selected ? "★" : "☆";
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(Number(button.dataset.stars) === value));
+    });
+    document.getElementById("reviewRatingLabel").textContent = value ? ["", "很差", "较差", "还行", "推荐", "力荐"][value] : "未评分";
+  }
+
+  function openWatchedReview(data, el) {
+    pendingWatchedReview = { data: data, el: el };
+    document.getElementById("watchedReviewForm").reset();
+    setReviewRating("");
+    document.getElementById("watchedReviewTitle").textContent = "读过 · " + data.title;
+    document.getElementById("reviewCommentCount").textContent = "0 / 350";
+    watchedReviewMask.classList.add("show");
+    watchedReviewMask.querySelector("[data-stars]").focus();
+  }
+
+  function closeWatchedReview() {
+    watchedReviewMask.classList.remove("show");
+    if (pendingWatchedReview && pendingWatchedReview.el) pendingWatchedReview.el.focus();
+    pendingWatchedReview = null;
+  }
+
+  function submitWatchedReview(event) {
+    event.preventDefault();
+    if (!pendingWatchedReview || !mustAdmin() || saving) return;
+    if (Array.from(reviewComment.value).length > 350) { toast("短评最多350字"); return; }
+    var pending = pendingWatchedReview;
+    var data = Object.assign({}, pending.data, {
+      personalRating: reviewRating,
+      tags: document.getElementById("reviewTags").value.trim().split(/\s+/).filter(Boolean),
+      comment: reviewComment.value,
+      doubanPrivate: document.getElementById("reviewPrivate").checked
+    });
+    closeWatchedReview();
+    continueAddMovie(data, pending.el);
+  }
+
+  watchedReviewMask.querySelectorAll("[data-stars]").forEach(function (button) {
+    button.addEventListener("click", function () { setReviewRating(Number(button.dataset.stars)); });
+  });
+  document.getElementById("clearReviewRating").addEventListener("click", function () { setReviewRating(""); });
+  document.getElementById("cancelWatchedReview").addEventListener("click", closeWatchedReview);
+  document.getElementById("watchedReviewForm").addEventListener("submit", submitWatchedReview);
+  reviewComment.addEventListener("input", function () {
+    document.getElementById("reviewCommentCount").textContent = Array.from(reviewComment.value).length + " / 350";
+  });
+  watchedReviewMask.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") { event.stopPropagation(); closeWatchedReview(); }
+  });
+
+  function continueAddMovie(data, el) {
+    if (!mustAdmin() || saving) return;
+    var sid = doubanSubjectId(data.douban);
+    var listed = listedCopy(data);
+    if (listed) {
+      postMovie(data, false, el, "。「" + statusName(listed.status) + "」里已经有这部，没有再写进豆瓣");
+      return;
+    }
+    if (!sid) {
+      askConfirm("这部没有豆瓣链接，只能加在这个页面上，不会同步到豆瓣。", function () {
+        postMovie(data, false, el);
+      }, { title: "无法同步", ok: "只加在这里", okClass: "btn-save" });
+      return;
+    }
+    api("/api/douban/session").then(function (session) {
+      if (session.loggedIn) {
+        postMovie(data, true, el);
+        return;
+      }
+      askConfirm("还没登录豆瓣。要写进豆瓣，需要先登录。", function () {
+        pendingDoubanAdd = { data: data, el: el };
+        openDoubanLoginForAdd();
+      }, {
+        title: "同步到豆瓣",
+        ok: "登录并同步",
+        okClass: "btn-save",
+        alt: "只加在这里",
+        altAction: function () { postMovie(data, false, el); }
+      });
+    }).catch(function (err) {
+      toast(err.message || "没能确认豆瓣登录状态");
+    });
+  }
+
+  /* ==================== 详情：先展开，再由按钮去豆瓣 ==================== */
+  var detailMask = document.getElementById("detailMask");
+
+  function detailLine(label, value) {
+    if (!value) return "";
+    return '<div class="detail-row"><span>' + esc(label) + '</span>' + esc(value) + '</div>';
+  }
+
+  function openDetail(item) {
+    var statusCls = item.status === "want" ? "want" : (item.status === "reading" ? "reading" : "read");
+    var poster = posterUrl(item.poster);
+    var posterImg = poster
+      ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var score = (item.rating !== undefined && item.rating !== "" && item.rating !== null)
+      ? '<div class="detail-score">★ ' + esc(item.rating) + '</div>' : "";
+    document.getElementById("detailBody").innerHTML =
+      '<div class="detail-poster" style="background:' + posterStyle(item.title) + '">' +
+        '<span class="initial">' + esc(item.title.charAt(0)) + '</span>' + posterImg +
+      '</div>' +
+      '<div class="detail-main">' +
+        '<div class="detail-kicker">' +
+          '<span class="detail-chip ' + statusCls + '">' + statusName(item.status) + '</span>' +
+        '</div>' +
+        '<h3 class="detail-title" id="detailTitle">' + esc(item.title) +
+          (item.year ? '<span class="detail-year">' + esc(item.year) + '</span>' : '') +
+        '</h3>' +
+        (item.titleEn ? '<div class="detail-en">' + esc(item.titleEn) + '</div>' : '') +
+        score +
+        '<div class="detail-rows">' +
+          detailLine("作者", item.author) +
+          detailLine("主演", (item.translator || []).join(" / ")) +
+          detailLine("出版社", (item.publishers || []).join(" / ")) +
+          detailLine("类型", (item.genres || []).join(" / ")) +
+          detailLine("我的评分", item.personalRating ? "★".repeat(Number(item.personalRating)) : "") +
+          detailLine("我的标签", (item.tags || []).join(" ")) +
+          detailLine("我的短评", item.comment) +
+        '</div>' +
+        '<div class="detail-actions">' +
+          '<a class="detail-douban" href="' + esc(doubanUrl(item)) + '" target="_blank" rel="noopener">在豆瓣打开</a>' +
+        '</div>' +
+      '</div>';
+    detailMask.classList.add("show");
+  }
+
+  function closeDetail() {
+    detailMask.classList.remove("show");
+  }
+
+  document.getElementById("detailClose").addEventListener("click", closeDetail);
+  detailMask.addEventListener("click", function (e) { if (e.target === detailMask) closeDetail(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (rateMask.classList.contains("show")) { closeRateDialog(); return; }
+    if (detailMask.classList.contains("show")) closeDetail();
+  });
+
+  /* ==================== 卡片交互：详情 / 编辑 / 删除 / 状态切换 ==================== */
+  mainEl.addEventListener("click", function (e) {
+    // 分页按钮
+    var pagerBtn = e.target.closest(".pager button");
+    if (pagerBtn) {
+      if (pagerBtn.closest(".pager-jump")) return;
+      if (pagerBtn.disabled) return;
+      var p = pagerBtn.getAttribute("data-p");
+      var totalPages = Math.ceil(items.filter(match).length / PAGE_SIZE);
+      if (p === "prev") curPage = Math.max(1, curPage - 1);
+      else if (p === "next") curPage = Math.min(totalPages, curPage + 1);
+      else curPage = parseInt(p, 10);
+      render();
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    var card = e.target.closest(".card");
+    if (!card) return;
+    var item = items.find(function (m) { return m.id === card.getAttribute("data-id"); });
+    if (!item) return;
+
+    if (e.target.closest(".status-select")) return; // 状态下拉由 change 事件处理
+    if (e.target.closest(".rate-btn")) {
+      if (!mustAdmin()) return;
+      openRateDialog(item);
+      return;
+    }
+
+    if (e.target.closest(".edit-btn")) { openEditModal(item); return; }
+    if (e.target.closest(".del-btn")) { askDelete(item); return; }
+
+    openDetail(item);
+  });
+
+  mainEl.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var card = e.target.closest(".card");
+    if (!card || e.target.closest(".status-select, .edit-btn, .del-btn, .rate-btn")) return;
+    e.preventDefault();
+    var item = items.find(function (m) { return m.id === card.getAttribute("data-id"); });
+    if (item) openDetail(item);
+  });
+
+  var rateLabels = ["", "很差", "较差", "还行", "推荐", "力荐"];
+
+  function choosePersonalRating(item, stars) {
+    if (!stars || stars < 1 || stars > 5 || saving) return;
+    var current = Number(item.personalRating) || 0;
+    if (current === stars) return;
+    function start() {
+      if (!doubanSubjectId(item.douban)) {
+        askConfirm("这部没有豆瓣链接，只会改这个页面，不会同步到豆瓣。", function () {
+          savePersonalRating(item, stars, false);
+        }, { title: "无法同步", ok: "只改这里", okClass: "btn-save" });
+        return;
+      }
+      api("/api/douban/session").then(function (session) {
+        if (session.loggedIn) {
+          savePersonalRating(item, stars, true);
+          return;
+        }
+        askConfirm("还没登录豆瓣。要把评分写进豆瓣，需要先登录。", function () {
+          pendingDoubanAdd = { kind: "rating", item: item, stars: stars };
+          openDoubanLoginForAdd("登录后会把《" + item.title + "》的评分写进豆瓣");
+        }, {
+          title: "同步到豆瓣",
+          ok: "登录并同步",
+          okClass: "btn-save",
+          alt: "只改这里",
+          altAction: function () { savePersonalRating(item, stars, false); }
+        });
+      }).catch(function () {
+        toast("没能确认豆瓣登录状态");
+      });
+    }
+    if (current) {
+      askConfirm("《" + item.title + "》现在是 " + current + " 星（" + rateLabels[current] + "）。改成 " + stars + " 星会覆盖豆瓣上原来的评分。", start, {
+        title: "修改评分",
+        ok: "确认修改",
+        okClass: "btn-save"
+      });
+      return;
+    }
+    start();
+  }
+
+  function savePersonalRating(item, stars, sync) {
+    var body = {};
+    Object.keys(item).forEach(function (key) { body[key] = item[key]; });
+    body.personalRating = stars;
+    body.syncDouban = !!sync;
+    saving = true;
+    var openId = rateItemId;
+    api("/api/books/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
+      saving = false;
+      applyList(res);
+      if (openId && rateItemId === openId) {
+        var updated = items.find(function (movie) { return movie.id === openId; });
+        if (updated) paintRateDialog(updated);
+      }
+      var note = "";
+      if (res.doubanSync && res.doubanSync.ok) note = "，已同步到豆瓣";
+      else if (res.doubanSync && res.doubanSync.ok === false) note = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+      toast("《" + item.title + "》已评为 " + stars + " 星" + note, note.indexOf("没写进") === -1 ? 2200 : 4200);
+    }).catch(function (err) {
+      saving = false;
+      render();
+      toast(err.message || "评分失败");
+    });
+  }
+
+  var rateMask = document.getElementById("rateMask");
+
+  function paintRateDialog(item) {
+    var mine = Number(item.personalRating) || 0;
+    var poster = posterUrl(item.poster);
+    var posterImg = poster
+      ? '<img src="' + esc(poster) + '"' + relayAttr(poster) + ' alt="" referrerpolicy="no-referrer" onerror="imgErr(this)">' : "";
+    var stars = "";
+    for (var star = 1; star <= 5; star++) {
+      stars += '<button type="button" class="rate-star' + (star <= mine ? " on" : "") + '" data-stars="' + star + '" aria-label="' + star + "星 " + rateLabels[star] + '">' + (star <= mine ? "★" : "☆") + "</button>";
+    }
+    var translator = (item.translator || []).join(" / ");
+    document.getElementById("rateBody").innerHTML =
+      '<div class="detail-poster" style="background:' + posterStyle(item.title) + '">' +
+        '<span class="initial">' + esc(item.title.charAt(0)) + "</span>" + posterImg +
+      "</div>" +
+      '<div class="detail-main">' +
+        '<h3 class="detail-title" id="rateTitle">' + esc(item.title) +
+          (item.year ? '<span class="detail-year">' + esc(item.year) + "</span>" : "") +
+        "</h3>" +
+        '<div class="rate-copy"><span>作者</span>' + esc(item.author || "暂无") + "</div>" +
+        '<div class="rate-copy"><span>主演</span>' + esc(translator || "暂无") + "</div>" +
+        '<div class="rate-dialog-stars" role="group" aria-label="我的评分">' + stars + "</div>" +
+        '<div class="rate-dialog-label">' + (mine ? "当前 " + mine + " 星 · " + rateLabels[mine] + "，点一下修改" : "还没有评分，点一下给分") + "</div>" +
+      "</div>";
+  }
+
+  function openRateDialog(item) {
+    rateItemId = item.id;
+    paintRateDialog(item);
+    rateMask.classList.add("show");
+  }
+
+  function closeRateDialog() {
+    rateMask.classList.remove("show");
+    rateItemId = "";
+  }
+
+  document.getElementById("rateClose").addEventListener("click", closeRateDialog);
+  rateMask.addEventListener("click", function (event) {
+    if (event.target === rateMask) { closeRateDialog(); return; }
+    var starBtn = event.target.closest(".rate-star");
+    if (!starBtn || !rateItemId || !mustAdmin()) return;
+    var item = items.find(function (movie) { return movie.id === rateItemId; });
+    if (item) choosePersonalRating(item, Number(starBtn.getAttribute("data-stars")));
+  });
+
+  function saveStatus(item, next, sync) {
+    var body = {};
+    Object.keys(item).forEach(function (key) { body[key] = item[key]; });
+    body.status = next;
+    body.syncDouban = !!sync;
+    saving = true;
+    api("/api/books/" + encodeURIComponent(item.id), { method: "PUT", body: body }).then(function (res) {
+      saving = false;
+      applyList(res);
+      var note = "";
+      if (res.doubanSync && res.doubanSync.ok) note = "，已同步到豆瓣";
+      else if (res.doubanSync && res.doubanSync.ok === false) note = "。没写进豆瓣：" + (res.doubanSync.error || "失败");
+      toast("《" + item.title + "》已改为「" + statusName(next) + "」" + note, note.indexOf("没写进") === -1 ? 2200 : 4200);
+    }).catch(function (err) {
+      saving = false;
+      render();
+      toast(err.message || "修改失败");
+    });
+  }
+
+  // 卡片右上角下拉：切换读过 / 在读 / 想读，并同步到豆瓣
+  mainEl.addEventListener("change", function (e) {
+    var sel = e.target.closest(".status-select");
+    if (!sel) return;
+    var card = sel.closest(".card");
+    var item = items.find(function (m) { return m.id === card.getAttribute("data-id"); });
+    if (!item) return;
+    if (!isAdmin || saving) { render(); return; }
+    var next = sel.value;
+    if (item.status === next) return;
+    if (!doubanSubjectId(item.douban)) {
+      askConfirm("这部没有豆瓣链接，只会改这个页面，不会同步到豆瓣。", function () {
+        saveStatus(item, next, false);
+      }, { title: "无法同步", ok: "只改这里", okClass: "btn-save", onCancel: function () { render(); } });
+      return;
+    }
+    api("/api/douban/session").then(function (session) {
+      if (session.loggedIn) {
+        saveStatus(item, next, true);
+        return;
+      }
+      askConfirm("还没登录豆瓣。要把「" + statusName(next) + "」写进豆瓣，需要先登录。", function () {
+        pendingDoubanAdd = { kind: "status", item: item, next: next };
+        openDoubanLoginForAdd();
+      }, {
+        title: "同步到豆瓣",
+        ok: "登录并同步",
+        okClass: "btn-save",
+        alt: "只改这里",
+        altAction: function () { saveStatus(item, next, false); },
+        onCancel: function () { render(); }
+      });
+    }).catch(function () {
+      render();
+      toast("没能确认豆瓣登录状态");
+    });
+  });
+
+  mainEl.addEventListener("submit", function (e) {
+    var form = e.target.closest(".pager-jump");
+    if (!form) return;
+    e.preventDefault();
+    var totalPages = Math.ceil(items.filter(match).length / PAGE_SIZE);
+    var n = parseInt(form.querySelector("input").value, 10);
+    if (!n || n < 1 || n > totalPages) {
+      toast("请输入 1 到 " + totalPages + " 之间的页码");
+      return;
+    }
+    curPage = n;
+    render();
+    window.scrollTo(0, 0);
+  });
+
+  /* ==================== 通用确认弹窗（删除 / 重置共用） ==================== */
+  var confirmMask = document.getElementById("confirmMask");
+  var confirmText = document.getElementById("confirmText");
+  var confirmAction = null;
+  var confirmAltAction = null;
+  var confirmCancelAction = null;
+
+  function askConfirm(text, action, options) {
+    options = options || {};
+    document.querySelector("#confirmMask h3").textContent = options.title || "删除确认";
+    var okBtn = document.getElementById("confirmOk");
+    okBtn.textContent = options.ok || "确认删除";
+    okBtn.className = options.okClass || "btn-danger";
+    var altBtn = document.getElementById("confirmAlt");
+    if (options.alt) {
+      altBtn.style.display = "";
+      altBtn.textContent = options.alt;
+      confirmAltAction = options.altAction || null;
+    } else {
+      altBtn.style.display = "none";
+      confirmAltAction = null;
+    }
+    confirmText.textContent = text;
+    confirmAction = action;
+    confirmCancelAction = options.onCancel || null;
+    confirmMask.classList.add("show");
+  }
+
+  function closeConfirm() {
+    confirmMask.classList.remove("show");
+    confirmAction = null;
+    confirmAltAction = null;
+    confirmCancelAction = null;
+    document.querySelector("#confirmMask h3").textContent = "删除确认";
+    var okBtn = document.getElementById("confirmOk");
+    okBtn.textContent = "确认删除";
+    okBtn.className = "btn-danger";
+    document.getElementById("confirmAlt").style.display = "none";
+  }
+
+  document.getElementById("confirmCancel").addEventListener("click", function () {
+    var action = confirmCancelAction;
+    closeConfirm();
+    if (action) action();
+  });
+  confirmMask.addEventListener("click", function (e) {
+    if (e.target !== confirmMask) return;
+    var action = confirmCancelAction;
+    closeConfirm();
+    if (action) action();
+  });
+  document.getElementById("confirmOk").addEventListener("click", function () {
+    var action = confirmAction;
+    closeConfirm();
+    if (action) action();
+  });
+  document.getElementById("confirmAlt").addEventListener("click", function () {
+    var action = confirmAltAction;
+    closeConfirm();
+    if (action) action();
+  });
+
+  function askDelete(item) {
+    if (!mustAdmin()) return;
+    askConfirm("确定删除《" + item.title + "》吗？只从这里删除，豆瓣上的标记还在。", function () {
+      saving = true;
+      api("/api/books/" + encodeURIComponent(item.id), { method: "DELETE" }).then(function (res) {
+        saving = false;
+        applyList(res);
+        toast("已删除《" + item.title + "》");
+      }).catch(function (err) {
+        saving = false;
+        toast(err.message || "删除失败");
+      });
+    });
+  }
+
+  document.getElementById("clearBtn").addEventListener("click", function () {
+    if (!mustAdmin()) return;
+    if (!items.length) { toast("书单已经是空的"); return; }
+    var total = items.length;
+    askConfirm(
+      "当前书单共 " + total + " 部。清空会从服务器删掉全部书籍，访客也将看不到。请谨慎操作。",
+      function () {
+        askConfirm(
+          "再确认一次。清空后无法从页面恢复。如果还要这些片子，先点取消，用「导出备份」留一份。",
+          function () {
+            saving = true;
+            api("/api/books", { method: "PUT", body: [] }).then(function (res) {
+              saving = false;
+              curPage = 1;
+              applyList(res);
+              toast("已清空 " + total + " 部");
+            }).catch(function (err) {
+              saving = false;
+              toast(err.message || "清空失败");
+            });
+          },
+          { title: "再次确认", ok: "确认清空" }
+        );
+      },
+      { title: "清空书单", ok: "继续" }
+    );
+  });
+
+  // 重置筛选：所有筛选条件回到「全部」，不动数据
+  document.getElementById("resetBtn").addEventListener("click", function () {
+    askConfirm("确定重置筛选吗？不会删除片子。", function () {
+      curStatus = "all"; curRegion = "all"; curGenre = "all"; curDecade = "all";
+      curSort = "added";
+      curPage = 1; keyword = "";
+      document.getElementById("searchInput").value = "";
+      document.getElementById("sortFilter").value = "added";
+      [["statusTabs", "data-status"]].forEach(function (p) {
+        document.querySelectorAll("#" + p[0] + " button").forEach(function (b) {
+          b.classList.toggle("active", b.getAttribute(p[1]) === "all");
+        });
+      });
+      render();
+      toast("筛选已重置");
+    }, { title: "重置筛选", ok: "确认重置" });
+  });
+
+  /* ==================== 导出 / 导入 ==================== */
+  document.getElementById("updateBtn").addEventListener("click", function () {
+    if (!mustAdmin()) return;
+    saving = true;
+    toast("正在从豆瓣补全资料…");
+    api("/api/books/refresh", { method: "POST", body: {} }).then(function (res) {
+      saving = false;
+      applyList(res);
+      var message = res.filled ? "已补全 " + res.filled + " 部的资料" : "没有需要补的资料";
+      if (res.more) message += "，还有没补完的，再点一次";
+      toast(message);
+    }).catch(function (err) {
+      saving = false;
+      toast(err.message || "更新失败");
+    });
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "我的书单备份.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  });
+
+  var importFile = document.getElementById("importFile");
+  document.getElementById("importBtn").addEventListener("click", function () { importFile.click(); });
+  importFile.addEventListener("change", function () {
+    var file = this.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(reader.result);
+        if (!Array.isArray(data)) throw new Error("not array");
+        if (!isAdmin) { toast("请先登录"); return; }
+        if (!confirm("导入将覆盖服务器上的全部书单（共 " + data.length + " 条），确定吗？")) return;
+        saving = true;
+        api("/api/books", { method: "PUT", body: data }).then(function (res) {
+          saving = false;
+          applyList(res);
+          toast("已导入 " + data.length + " 条");
+        }).catch(function (err) {
+          saving = false;
+          toast(err.message || "导入失败");
+        });
+      } catch (e) {
+        alert("文件格式不对，请选择之前导出的备份文件");
+      }
+      importFile.value = "";
+    };
+    reader.readAsText(file);
+  });
+
+  function importSummary(res) {
+    var lines = [];
+    function line(label, bucket) {
+      if (!bucket) return;
+      var watched = bucket.read || 0;
+      var doing = bucket.reading || 0;
+      var want = bucket.want || 0;
+      var total = watched + doing + want;
+      if (!total) return;
+      var parts = [];
+      if (watched) parts.push("读过 " + watched);
+      if (doing) parts.push("在读 " + doing);
+      if (want) parts.push("想读 " + want);
+      lines.push(label + " " + total + "：" + parts.join("，"));
+    }
+    if (res.added) {
+      lines.push("新加 " + res.added + " 本");
+      line("书籍", res.counts);
+    } else {
+      lines.push("没有新的书");
+    }
+    if (res.updated) lines.push("状态改成和豆瓣一样的有 " + res.updated + " 本");
+    if (res.skipped && !res.caughtUp) lines.push("书单里已有的 " + res.skipped + " 本已跳过");
+    if (res.duplicate) lines.push("豆瓣里有 " + res.duplicate + " 条重复记录，只保留了一条");
+    if (res.caughtUp) lines.push("只核对了最新的几页，更早的没有再翻");
+    if (res.more) lines.push("还有没导完的，正在继续");
+    var note = progressNote(res.progress);
+    if (note) lines.push(note);
+    return lines.join("\n");
+  }
+
+  function progressNote(progress) {
+    if (!progress) return "";
+    var names = { done: "读过", doing: "在读", mark: "想读" };
+    var bits = [];
+    var incomplete = false;
+    var caught = false;
+    ["done", "reading", "mark"].forEach(function (key) {
+      var item = progress[key];
+      if (!item || !item.total) return;
+      if (item.caughtUp) {
+        bits.push(names[key] + " 只看了最新的");
+        caught = true;
+        return;
+      }
+      var read = Math.min(item.read || 0, item.total);
+      bits.push(names[key] + " " + read + "/" + item.total);
+      if (read < item.total) incomplete = true;
+    });
+    if (!bits.length) return "";
+    if (incomplete) return "豆瓣原表：" + bits.join("，") + "。还没读完";
+    if (caught) return "豆瓣原表：" + bits.join("，");
+    return "豆瓣原表：" + bits.join("，") + "。这几栏已经读完";
+  }
+
+  function importStillShort(res) {
+    var progress = res.progress || {};
+    var cursors = res.cursors || {};
+    var short = false;
+    ["done", "reading", "mark"].forEach(function (key) {
+      var item = progress[key];
+      if (!item || !item.total || (item.read || 0) >= item.total) return;
+      if (cursors[key] === -1) return;
+      short = true;
+    });
+    return short;
+  }
+
+  function importProgress(added, res) {
+    var names = { done: "读过", doing: "在读", mark: "想读" };
+    var bits = [];
+    var progress = res.progress || {};
+    ["done", "reading", "mark"].forEach(function (key) {
+      var item = progress[key];
+      if (!item || !item.total) return;
+      bits.push(names[key] + " " + Math.min(item.read || 0, item.total) + "/" + item.total);
+    });
+    var line = "已新加 " + added + " 本";
+    if (bits.length) line += "（" + bits.join("，") + "）";
+    if (res.more) line += "，还在继续，请先别关这个窗口";
+    return line;
+  }
+
+  function emptyCounts() {
+    return { read: 0, reading: 0, want: 0 };
+  }
+
+  function mergeCounts(into, extra) {
+    ["read", "reading", "want"].forEach(function (status) {
+      into[status] += (extra && extra[status]) || 0;
+    });
+  }
+
+  var doubanImportMask = document.getElementById("doubanImportMask");
+  var doubanImportStatus = document.getElementById("doubanImportStatus");
+  var doubanLoginStatus = document.getElementById("doubanLoginStatus");
+  var doubanCursors = {};
+  var doubanCaptchaId = "";
+  var doubanMode = "phone";
+  var doubanTicket = { ticket: "", randstr: "", tcAppId: "" };
+  var doubanCodeTimer = 0;
+  document.getElementById("doubanMode").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    doubanMode = btn.getAttribute("data-mode") === "password" ? "password" : "phone";
+    document.querySelectorAll("#doubanMode button").forEach(function (item) {
+      item.classList.toggle("active", item === btn);
+    });
+    document.getElementById("doubanPhonePane").style.display = doubanMode === "phone" ? "" : "none";
+    document.getElementById("doubanPasswordPane").style.display = doubanMode === "password" ? "" : "none";
+    doubanLoginStatus.textContent = "";
+  });
+  document.getElementById("doubanStatusPick").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    btn.classList.toggle("active");
+  });
+  function showDoubanLogin() {
+    document.getElementById("doubanLoginHint").style.display = "";
+    document.getElementById("doubanMode").style.display = "";
+    document.getElementById("doubanLoginForm").style.display = "";
+    document.getElementById("doubanImportForm").style.display = "none";
+  }
+  function showDoubanReady(uid) {
+    document.getElementById("doubanLoginHint").style.display = "none";
+    document.getElementById("doubanMode").style.display = "none";
+    document.getElementById("doubanLoginForm").style.display = "none";
+    document.getElementById("doubanImportForm").style.display = "";
+    document.getElementById("doubanWho").textContent = "已登录豆瓣账号 " + uid + "。只导入电影和电视剧。开始导入只核对最新的，整理导入才补旧片。";
+    if (pendingDoubanAdd) {
+      var pending = pendingDoubanAdd;
+      pendingDoubanAdd = null;
+      doubanImportMask.classList.remove("show");
+      if (pending.kind === "status") saveStatus(pending.item, pending.next, true);
+      else if (pending.kind === "rating") savePersonalRating(pending.item, pending.stars, true);
+      else postMovie(pending.data, true, pending.el);
+    }
+  }
+  document.getElementById("doubanImportBtn").addEventListener("click", function () {
+    if (!mustAdmin()) return;
+    doubanLoginStatus.textContent = "";
+    doubanImportStatus.textContent = "";
+    showDoubanLogin();
+    doubanImportMask.classList.add("show");
+    api("/api/douban/session").then(function (res) {
+      if (res.loggedIn) showDoubanReady(res.uid);
+      else document.getElementById(doubanMode === "phone" ? "doubanPhone" : "doubanAccount").focus();
+    }).catch(function () {});
+  });
+  function closeDoubanImport() {
+    doubanImportMask.classList.remove("show");
+    if (pendingDoubanAdd) {
+      var wasEdit = pendingDoubanAdd.kind === "status" || pendingDoubanAdd.kind === "rating";
+      pendingDoubanAdd = null;
+      if (wasEdit) render();
+      toast(wasEdit ? "没有修改" : "这部还没加上");
+    }
+  }
+  document.getElementById("doubanImportCancel").addEventListener("click", function () {
+    if (saving) return;
+    closeDoubanImport();
+  });
+  doubanImportMask.addEventListener("click", function (e) {
+    if (e.target === doubanImportMask && !saving) closeDoubanImport();
+  });
+  function doubanPhone() {
+    return document.getElementById("doubanPhone").value.replace(/\s/g, "");
+  }
+  function doubanAuthBody(extra) {
+    var body = Object.assign({}, extra);
+    if (doubanTicket.ticket) {
+      body.ticket = doubanTicket.ticket;
+      body.randstr = doubanTicket.randstr;
+      body.tcAppId = doubanTicket.tcAppId;
+    }
+    if (doubanCaptchaId) {
+      body.captchaId = doubanCaptchaId;
+      body.captcha = document.getElementById("doubanCaptcha").value.trim();
+    }
+    return body;
+  }
+  function showDoubanSlider(url, appId) {
+    return new Promise(function (resolve, reject) {
+      if (!/^https:\/\/([\w-]+\.)+(qq|tencent|qcloud)\.com(\/|$)/.test(url) || !/^\d{4,20}$/.test(appId)) {
+        reject(new Error("豆瓣验证码没有加载出来"));
+        return;
+      }
+      function open() {
+        try {
+          var widget = new TencentCaptcha(appId, function (result) {
+            if (result && result.ret === 0 && result.ticket) {
+              doubanTicket = { ticket: result.ticket, randstr: result.randstr || "", tcAppId: appId };
+              resolve();
+            } else {
+              reject(new Error("滑动验证没有完成"));
+            }
+          });
+          widget.show();
+        } catch (err) {
+          reject(new Error("豆瓣验证码没有加载出来"));
+        }
+      }
+      if (window.TencentCaptcha) { open(); return; }
+      var script = document.createElement("script");
+      script.src = url;
+      script.onload = open;
+      script.onerror = function () { reject(new Error("豆瓣验证码没有加载出来")); };
+      document.body.appendChild(script);
+    });
+  }
+  function doubanCall(path, body, attempt) {
+    return api(path, { method: "POST", body: doubanAuthBody(body) }).then(function (res) {
+      if (res.needCaptcha && res.captchaKind === "slider") {
+        doubanTicket = { ticket: "", randstr: "", tcAppId: "" };
+        if ((attempt || 0) >= 2) throw new Error("滑动验证没有通过，请再试一次");
+        doubanLoginStatus.textContent = "请完成滑动验证";
+        return showDoubanSlider(res.touchCapUrl, res.tcAppId).then(function () {
+          return doubanCall(path, body, (attempt || 0) + 1);
+        });
+      }
+      doubanTicket = { ticket: "", randstr: "", tcAppId: "" };
+      if (res.needCaptcha) {
+        doubanCaptchaId = res.captchaId || "";
+        document.getElementById("doubanCaptchaBox").style.display = "flex";
+        document.getElementById("doubanCaptchaImg").src = res.captchaImage || "";
+        document.getElementById("doubanCaptcha").value = "";
+        doubanLoginStatus.textContent = "请填写图中的验证码，然后再点一次";
+        document.getElementById("doubanCaptcha").focus();
+        return res;
+      }
+      doubanCaptchaId = "";
+      document.getElementById("doubanCaptchaBox").style.display = "none";
+      return res;
+    });
+  }
+  function startSmsCountdown() {
+    var btn = document.getElementById("doubanSendCode");
+    var left = 60;
+    if (doubanCodeTimer) clearInterval(doubanCodeTimer);
+    btn.disabled = true;
+    btn.textContent = left + " 秒";
+    doubanCodeTimer = setInterval(function () {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(doubanCodeTimer);
+        doubanCodeTimer = 0;
+        btn.disabled = false;
+        btn.textContent = "获取验证码";
+        return;
+      }
+      btn.textContent = left + " 秒";
+    }, 1000);
+  }
+  document.getElementById("doubanSendCode").addEventListener("click", function () {
+    if (!mustAdmin() || saving) return;
+    var phone = doubanPhone();
+    if (!/^1[3-9]\d{9}$/.test(phone)) { doubanLoginStatus.textContent = "请填写11位手机号"; return; }
+    if (doubanCaptchaId && !document.getElementById("doubanCaptcha").value.trim()) {
+      doubanLoginStatus.textContent = "请填写图中的验证码";
+      return;
+    }
+    saving = true;
+    document.getElementById("doubanSendCode").disabled = true;
+    doubanLoginStatus.textContent = "正在向豆瓣发送验证码…";
+    doubanCall("/api/douban/phone-code", { areaCode: "+86", phone: phone }).then(function (res) {
+      saving = false;
+      if (res && res.needCaptcha) {
+        document.getElementById("doubanSendCode").disabled = false;
+        return;
+      }
+      doubanLoginStatus.textContent = "验证码已发送，请填写短信里的数字";
+      startSmsCountdown();
+    }).catch(function (err) {
+      saving = false;
+      document.getElementById("doubanSendCode").disabled = false;
+      document.getElementById("doubanSendCode").textContent = "获取验证码";
+      doubanLoginStatus.textContent = err.message || "验证码发送失败";
+    });
+  });
+  document.getElementById("doubanLoginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!mustAdmin() || saving) return;
+    var path = "/api/douban/login";
+    var body;
+    if (doubanMode === "phone") {
+      var phone = doubanPhone();
+      var code = document.getElementById("doubanSms").value.trim();
+      if (!/^1[3-9]\d{9}$/.test(phone)) { doubanLoginStatus.textContent = "请填写11位手机号"; return; }
+      if (!/^\d{4,8}$/.test(code)) { doubanLoginStatus.textContent = "请填写短信验证码"; return; }
+      path = "/api/douban/phone-login";
+      body = { areaCode: "+86", phone: phone, code: code };
+    } else {
+      var account = document.getElementById("doubanAccount").value.trim();
+      var password = document.getElementById("doubanPassword").value;
+      if (!account || !password) { doubanLoginStatus.textContent = "请填写豆瓣账号和密码"; return; }
+      body = { account: account, password: password };
+    }
+    if (doubanCaptchaId && !document.getElementById("doubanCaptcha").value.trim()) {
+      doubanLoginStatus.textContent = "请填写图中的验证码";
+      return;
+    }
+    saving = true;
+    document.getElementById("doubanLoginBtn").disabled = true;
+    doubanLoginStatus.textContent = "正在登录豆瓣…";
+    doubanCall(path, body).then(function (res) {
+      saving = false;
+      document.getElementById("doubanLoginBtn").disabled = false;
+      if (!res || res.needCaptcha) return;
+      document.getElementById("doubanPassword").value = "";
+      document.getElementById("doubanSms").value = "";
+      doubanLoginStatus.textContent = "";
+      showDoubanReady(res.uid);
+    }).catch(function (err) {
+      saving = false;
+      document.getElementById("doubanLoginBtn").disabled = false;
+      doubanLoginStatus.textContent = err.message || "登录失败";
+    });
+  });
+  document.getElementById("doubanLogoutBtn").addEventListener("click", function () {
+    if (saving) return;
+    api("/api/douban/logout", { method: "POST", body: {} }).then(function () {
+      showDoubanLogin();
+      doubanLoginStatus.textContent = "已退出豆瓣";
+    }).catch(function (err) {
+      doubanImportStatus.textContent = err.message || "退出失败";
+    });
+  });
+  function setDoubanImportBusy(on) {
+    document.getElementById("doubanImportSubmit").disabled = on;
+    document.getElementById("doubanTidyBtn").disabled = on;
+  }
+  function startDoubanImport(fullScan) {
+    if (!mustAdmin()) return;
+    var statusMap = { watched: "done", doing: "reading", want: "mark" };
+    var statuses = [];
+    document.querySelectorAll("#doubanStatusPick button.active").forEach(function (btn) {
+      statuses.push(statusMap[btn.getAttribute("data-status")]);
+    });
+    if (!statuses.length) { doubanImportStatus.textContent = "请至少选择一种"; return; }
+    doubanCursors = {};
+    saving = true;
+    setDoubanImportBusy(true);
+    doubanImportStatus.textContent = fullScan
+      ? "正在把整张豆瓣表再读一遍。读过和想读加起来有一千部左右，会分几次拉，请先别关这个窗口…"
+      : "只核对最新的片子。翻到已经在书单里的那一页就停。";
+    var added = 0;
+    var skipped = 0;
+    var duplicate = 0;
+    var updated = 0;
+    var startedEmpty = items.length === 0;
+    var counts = emptyCounts();
+    var rounds = 0;
+    function pull() {
+      rounds += 1;
+      if (rounds > 40) {
+        saving = false;
+        setDoubanImportBusy(false);
+        doubanImportStatus.textContent = importSummary({ added: added, skipped: skipped, duplicate: duplicate, updated: updated, counts: counts, more: true });
+        toast(added ? "新加 " + added + " 本" : "还没有导完");
+        return;
+      }
+      api("/api/books/import-douban", {
+        method: "POST",
+        body: { statuses: statuses, cursors: doubanCursors, full: fullScan }
+      }).then(function (res) {
+        applyList(res);
+        added += res.added || 0;
+        var batchSkipped = res.skipped || 0;
+        var batchDuplicate = res.duplicate || 0;
+        if (startedEmpty) {
+          batchDuplicate += batchSkipped;
+          batchSkipped = 0;
+        }
+        skipped += batchSkipped;
+        duplicate += batchDuplicate;
+        updated += res.updated || 0;
+        mergeCounts(counts, res.counts);
+        doubanCursors = res.cursors || {};
+        var keepGoing = res.more || importStillShort(res);
+        if (keepGoing) {
+          doubanImportStatus.textContent = importProgress(added, res);
+          pull();
+          return;
+        }
+        saving = false;
+        setDoubanImportBusy(false);
+        var summary = { added: added, skipped: skipped, duplicate: duplicate, updated: updated, caughtUp: !!res.caughtUp, counts: counts, more: false, progress: res.progress };
+        doubanImportStatus.textContent = importSummary(summary);
+        toast(added ? "新加 " + added + " 本" : "没有新的书");
+      }).catch(function (err) {
+        saving = false;
+        setDoubanImportBusy(false);
+        var message = err.message || "导入失败";
+        if (message.indexOf("登录豆瓣") !== -1 || message.indexOf("重新登录") !== -1) {
+          showDoubanLogin();
+          if (added) message += "\n已经导入 " + added + " 部，登录后再次导入会从这里继续";
+          doubanLoginStatus.textContent = message;
+        } else {
+          if (added) message += "\n已经导入 " + added + " 部，再点一次会从这里继续";
+          doubanImportStatus.textContent = message;
+        }
+      });
+    }
+    pull();
+  }
+  document.getElementById("doubanImportForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    startDoubanImport(false);
+  });
+  document.getElementById("doubanTidyBtn").addEventListener("click", function () {
+    startDoubanImport(true);
+  });
+
+  /* ==================== 筛选 / 搜索 ==================== */
+  document.getElementById("statusTabs").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    curStatus = btn.getAttribute("data-status");
+    curPage = 1;
+    this.querySelectorAll("button").forEach(function (b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    render();
+  });
+
+
+  regionFilter.addEventListener("change", function () { curRegion = this.value; curPage = 1; render(); });
+  genreFilter.addEventListener("change", function () { curGenre = this.value; curPage = 1; render(); });
+  document.getElementById("decadeFilter").addEventListener("change", function () { curDecade = this.value; curPage = 1; render(); });
+  document.getElementById("sortFilter").addEventListener("change", function () { curSort = this.value; curPage = 1; render(); });
+
+  document.getElementById("searchInput").addEventListener("input", function () {
+    keyword = this.value.trim().toLowerCase();
+    curPage = 1;
+    render();
+  });
+
+  var loginMask = document.getElementById("loginMask");
+  var loginError = document.getElementById("loginError");
+  var passwordMask = document.getElementById("passwordMask");
+  var passwordForm = document.getElementById("passwordForm");
+  var passwordError = document.getElementById("passwordError");
+  function closePasswordModal() {
+    passwordMask.classList.remove("show");
+    passwordForm.reset();
+    passwordError.textContent = "";
+  }
+  document.getElementById("changePasswordBtn").addEventListener("click", function () {
+    if (!mustAdmin()) return;
+    passwordForm.reset();
+    passwordError.textContent = "";
+    passwordMask.classList.add("show");
+    document.getElementById("currentAdminPassword").focus();
+  });
+  document.getElementById("passwordCancel").addEventListener("click", closePasswordModal);
+  passwordMask.addEventListener("click", function (event) { if (event.target === passwordMask) closePasswordModal(); });
+  passwordForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var current = document.getElementById("currentAdminPassword").value;
+    var next = document.getElementById("newAdminPassword").value;
+    var confirmation = document.getElementById("confirmAdminPassword").value;
+    if (!current || !next) { passwordError.textContent = "请填写当前密码和新密码"; return; }
+    if (next !== confirmation) { passwordError.textContent = "两次输入的新密码不一致"; return; }
+    var button = document.getElementById("passwordSave");
+    button.disabled = true;
+    passwordError.textContent = "正在修改…";
+    api("/api/password", { method: "POST", body: {
+      current_password: current, new_password: next, confirm_password: confirmation
+    } }).then(function () {
+      closePasswordModal();
+      closeModal();
+      setLoggedIn(false);
+      openAddAfterLogin = false;
+      openLogin();
+      loginError.textContent = "管理密码已修改，请用新密码重新登录";
+      toast("管理密码已修改，请重新登录");
+    }).catch(function (error) {
+      passwordError.textContent = error.message || "修改失败";
+    }).finally(function () { button.disabled = false; });
+  });
+  document.getElementById("loginBtn").addEventListener("click", function () {
+    if (isAdmin) {
+      setLoggedIn(false);
+      toast("已退出，现在只能查看");
+      return;
+    }
+    openAddAfterLogin = false;
+    openLogin();
+  });
+  document.getElementById("loginCancel").addEventListener("click", function () {
+    loginMask.classList.remove("show");
+  });
+  loginMask.addEventListener("click", function (e) {
+    if (e.target === loginMask) loginMask.classList.remove("show");
+  });
+  document.getElementById("loginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var password = document.getElementById("loginPassword").value;
+    if (!password) { loginError.textContent = "请输入密码"; return; }
+    loginError.textContent = "正在登录…";
+    api("/api/login", { method: "POST", body: { password: password } }).then(function (res) {
+      localStorage.setItem(TOKEN_KEY, res.token);
+      document.getElementById("loginPassword").value = "";
+      loginError.textContent = "";
+      loginMask.classList.remove("show");
+      setLoggedIn(true);
+      toast("已登录，可以添加和删除了");
+      if (openAddAfterLogin) {
+        openAddAfterLogin = false;
+        openModal();
+      }
+    }).catch(function (err) {
+      loginError.textContent = err.message || "登录失败";
+    });
+  });
+
+  /* ==================== 启动 ==================== */
+  loadMovies();
+  if (localStorage.getItem(TOKEN_KEY)) {
+    api("/api/me").then(function () { setLoggedIn(true); }).catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
