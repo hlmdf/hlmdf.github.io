@@ -36,11 +36,12 @@ const nav: NavItem[] = [
     ? [{ href: "/news", zh: "新闻", en: "News" }]
     : []),
   { href: "/life", zh: "生活", en: "Life" },
-  // 【2026-11-09 新增】博客：独立部署在阿里云服务器（tools/blog/），新标签页跳转
-  { href: "https://47.103.222.155:5012/", zh: "博客", en: "Blog", external: true },
   { href: "/tools", zh: "实用工具", en: "Tools" },
   { href: "/links", zh: "网址", en: "Links" },
   { href: "/personal", zh: "个人工具", en: "Personal" },
+  // 【2026-11-09 新增】博客：独立部署在阿里云服务器（tools/blog/），新标签页跳转
+  // 【2026-11-09 修改】按用户要求从"生活"后面移到"个人工具"后面（原位置：/life 之后）
+  { href: "https://47.103.222.155:5012/", zh: "博客", en: "Blog", external: true },
 ];
 
 function WechatIcon({ className }: { className?: string }) {
