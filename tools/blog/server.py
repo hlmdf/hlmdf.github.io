@@ -33,6 +33,10 @@
 
 本地试跑：
     python server.py --host 127.0.0.1 --port 8012
+
+【2026-11-09 修改】按用户要求，接口错误提示全部中文化
+（原英文提示：wrong password / 请先登录 / 没有找到 / rate limited /
+try again later / bad request / empty or too large / only ... allowed）
 """
 
 import argparse
@@ -255,7 +259,7 @@ class Handler(BaseHTTPRequestHandler):
             with open(path, "rb") as f:
                 body = f.read()
         except OSError:
-            self._send_json({"error": "not found"}, 404)
+            self._send_json({"error": "没有找到"}, 404)
             return
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -303,7 +307,7 @@ class Handler(BaseHTTPRequestHandler):
     def _api_gate(self):
         """接口通用入口检查：限流。返回 False 表示已回复，调用方直接 return"""
         if not rate_ok("api", self._client_ip(), API_RATE_PER_MINUTE, 60):
-            self._send_json({"error": "rate limited"}, 429)
+            self._send_json({"error": "操作太频繁了，歇一会儿"}, 429)
             return False
         return True
 
@@ -315,11 +319,11 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_photo(self, name):
         # 文件名白名单 + 落在照片目录内，防目录穿越
         if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or ".." in name:
-            self._send_json({"error": "not found"}, 404)
+            self._send_json({"error": "没有找到"}, 404)
             return
         path = os.path.realpath(os.path.join(PHOTOS_DIR, name))
         if not path.startswith(os.path.realpath(PHOTOS_DIR) + os.sep):
-            self._send_json({"error": "not found"}, 404)
+            self._send_json({"error": "没有找到"}, 404)
             return
         ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
         self._send_file(path, ctype, 604800)  # 照片 immutable，缓存 7 天
@@ -375,7 +379,7 @@ class Handler(BaseHTTPRequestHandler):
             with data_lock:
                 post = find_post(load_posts(), match.group(1))
             if not post:
-                self._send_json({"error": "not found"}, 404)
+                self._send_json({"error": "没有找到"}, 404)
                 return
             self._send_json({"post": public_post(post, True)})
             return
@@ -391,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/comments":
             if not self._is_admin():
-                self._send_json({"error": "unauthorized"}, 401)
+                self._send_json({"error": "请先登录"}, 401)
                 return
             with data_lock:
                 comments = load_comments()
@@ -403,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"comments": comments})
             return
 
-        self._send_json({"error": "not found"}, 404)
+        self._send_json({"error": "没有找到"}, 404)
 
     # ---------- POST ----------
 
@@ -417,29 +421,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/login":
             ip = self._client_ip()
             if not rate_ok("login", ip, LOGIN_RATE_PER_MINUTE, 60):
-                self._send_json({"error": "try again later"}, 429)
+                self._send_json({"error": "尝试太多次了，一分钟后再试"}, 429)
                 return
             data = self._read_json()
             password = str((data or {}).get("password") or "")
             if not password or not check_password(password, config["password_hash"]):
-                self._send_json({"error": "wrong password"}, 401)
+                self._send_json({"error": "密码不对"}, 401)
                 return
             self._send_json({"token": make_token(config["token_secret"])})
             return
 
         if path == "/api/photos":
             if not self._is_admin():
-                self._send_json({"error": "unauthorized"}, 401)
+                self._send_json({"error": "请先登录"}, 401)
                 return
             params = urllib.parse.parse_qs(self.path.partition("?")[2])
             name = params.get("name", [""])[0].strip().lower()
             ext = os.path.splitext(name)[1]
             if ext not in PHOTO_EXTS:
-                self._send_json({"error": "only %s allowed" % "/".join(sorted(PHOTO_EXTS))}, 400)
+                self._send_json({"error": "只支持这些图片格式：%s" % "/".join(sorted(PHOTO_EXTS))}, 400)
                 return
             body = self._read_body(MAX_PHOTO_BODY)
             if not body:
-                self._send_json({"error": "empty or too large (max 10MB)"}, 400)
+                self._send_json({"error": "文件为空或超过 10MB 上限"}, 400)
                 return
             # 文件名由服务端生成，避免重名覆盖和奇怪字符
             fname = "%d-%s%s" % (int(time.time()), secrets.token_hex(4), ext)
@@ -451,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/posts":
             if not self._is_admin():
-                self._send_json({"error": "unauthorized"}, 401)
+                self._send_json({"error": "请先登录"}, 401)
                 return
             data = self._read_json()
             error, post = validate_post(data)
@@ -482,7 +486,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with data_lock:
                 if not find_post(load_posts(), post_id):
-                    self._send_json({"error": "not found"}, 404)
+                    self._send_json({"error": "没有找到"}, 404)
                     return
                 comment["id"] = "c-" + secrets.token_hex(6)
                 comment["post_id"] = post_id
@@ -495,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/password":
             if not self._is_admin():
-                self._send_json({"error": "unauthorized"}, 401)
+                self._send_json({"error": "请先登录"}, 401)
                 return
             data = self._read_json()
             current = str((data or {}).get("current") or "")
@@ -514,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True})
             return
 
-        self._send_json({"error": "not found"}, 404)
+        self._send_json({"error": "没有找到"}, 404)
 
     # ---------- PUT / DELETE ----------
 
@@ -524,10 +528,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         match = re.fullmatch(r"/api/posts/(p-[0-9a-f]+)", path)
         if not match:
-            self._send_json({"error": "not found"}, 404)
+            self._send_json({"error": "没有找到"}, 404)
             return
         if not self._is_admin():
-            self._send_json({"error": "unauthorized"}, 401)
+            self._send_json({"error": "请先登录"}, 401)
             return
         data = self._read_json()
         error, fields = validate_post(data)
@@ -538,7 +542,7 @@ class Handler(BaseHTTPRequestHandler):
             posts = load_posts()
             post = find_post(posts, match.group(1))
             if not post:
-                self._send_json({"error": "not found"}, 404)
+                self._send_json({"error": "没有找到"}, 404)
                 return
             post.update(fields)
             post["updated"] = int(time.time())
@@ -550,7 +554,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._api_gate():
             return
         if not self._is_admin():
-            self._send_json({"error": "unauthorized"}, 401)
+            self._send_json({"error": "请先登录"}, 401)
             return
 
         match = re.fullmatch(r"/api/posts/(p-[0-9a-f]+)", path)
@@ -560,7 +564,7 @@ class Handler(BaseHTTPRequestHandler):
                 posts = load_posts()
                 kept = [p for p in posts if p["id"] != post_id]
                 if len(kept) == len(posts):
-                    self._send_json({"error": "not found"}, 404)
+                    self._send_json({"error": "没有找到"}, 404)
                     return
                 save_json(POSTS_PATH, {"posts": kept})
                 comments = [c for c in load_comments() if c["post_id"] != post_id]
@@ -575,19 +579,19 @@ class Handler(BaseHTTPRequestHandler):
                 comments = load_comments()
                 kept = [c for c in comments if c["id"] != comment_id]
                 if len(kept) == len(comments):
-                    self._send_json({"error": "not found"}, 404)
+                    self._send_json({"error": "没有找到"}, 404)
                     return
                 save_json(COMMENTS_PATH, {"comments": kept})
             self._send_json({"ok": True})
             return
 
-        self._send_json({"error": "not found"}, 404)
+        self._send_json({"error": "没有找到"}, 404)
 
 
 def validate_post(data):
     """校验文章字段，返回 (错误信息, 可用字段)；通过时错误信息为 None"""
     if not isinstance(data, dict):
-        return "bad request", None
+        return "请求格式不对", None
     title = str(data.get("title") or "").strip()
     if not title or len(title) > TITLE_MAX:
         return "标题必填，且不超过 %d 字" % TITLE_MAX, None
@@ -607,7 +611,7 @@ def validate_comment(data):
     更狠的（验证码、审核后显示）对个人小站没必要，真被刷了再升级。
     """
     if not isinstance(data, dict):
-        return "bad request", None
+        return "请求格式不对", None
     name = str(data.get("name") or "").strip()
     if not name or len(name) > COMMENT_NAME_MAX:
         return "昵称必填，且不超过 %d 字" % COMMENT_NAME_MAX, None
