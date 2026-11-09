@@ -17,7 +17,9 @@ import {
 import { pick } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 
-type NavItem = { href: string; zh: string; en: string };
+// 原定义：type NavItem = { href: string; zh: string; en: string };
+// 【2026-11-09 新增】external 标记站外链接（如独立部署在阿里云的博客），渲染为新标签页打开的普通 <a>
+type NavItem = { href: string; zh: string; en: string; external?: boolean };
 
 /*
  * Talks and news only appear once there is something to read. An empty section
@@ -34,6 +36,8 @@ const nav: NavItem[] = [
     ? [{ href: "/news", zh: "新闻", en: "News" }]
     : []),
   { href: "/life", zh: "生活", en: "Life" },
+  // 【2026-11-09 新增】博客：独立部署在阿里云服务器（tools/blog/），新标签页跳转
+  { href: "https://47.103.222.155:5012/", zh: "博客", en: "Blog", external: true },
   { href: "/tools", zh: "实用工具", en: "Tools" },
   { href: "/links", zh: "网址", en: "Links" },
   { href: "/personal", zh: "个人工具", en: "Personal" },
@@ -314,6 +318,20 @@ export function SiteShell({ children }: { children: ReactNode }) {
           >
             {nav.map((item) => {
               const active = pathname === item.href;
+              // 【2026-11-09 新增】站外链接（博客）新标签页打开，下面的站内 Link 逻辑保持不变
+              if (item.external) {
+                return (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="border-b-2 border-transparent pb-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {item[lang]}
+                  </a>
+                );
+              }
               return (
                 <Link
                   key={item.href}
@@ -385,6 +403,21 @@ export function SiteShell({ children }: { children: ReactNode }) {
             <ul className="grid gap-1">
               {nav.map((item) => {
                 const active = pathname === item.href;
+                // 【2026-11-09 新增】站外链接（博客）新标签页打开，下面的站内 Link 逻辑保持不变
+                if (item.external) {
+                  return (
+                    <li key={item.href}>
+                      <a
+                        href={item.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-md px-3 py-2 text-sm text-muted-foreground"
+                      >
+                        {item[lang]}
+                      </a>
+                    </li>
+                  );
+                }
                 return (
                   <li key={item.href}>
                     <Link

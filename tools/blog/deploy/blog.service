@@ -1,0 +1,24 @@
+[Unit]
+Description=Personal blog (articles, photos, comments)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blog
+Group=blog
+WorkingDirectory=/opt/blog
+Environment=BLOG_DATA_DIR=/var/lib/blog
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/blog/server.py --host 127.0.0.1 --port 8012
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/blog
+
+[Install]
+WantedBy=multi-user.target

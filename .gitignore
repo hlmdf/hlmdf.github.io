@@ -87,6 +87,11 @@ next-env.d.ts
 /tools/air-radar/__pycache__/
 /tools/air-radar/*.zip
 
+# Blog: articles, photos, comments and passwords live on the server only.
+/tools/blog/data/
+/tools/blog/__pycache__/
+/tools/blog/*.zip
+
 # Local screenshot scratch space.
 /.screenshots/.tmp/
 
