@@ -507,8 +507,12 @@ class Handler(BaseHTTPRequestHandler):
             if not check_password(current, config["password_hash"]):
                 self._send_json({"error": "当前密码不对"}, 403)
                 return
-            if len(new) < 8:
-                self._send_json({"error": "新密码至少 8 位"}, 400)
+            # 【2026-11-09 修改】按用户要求取消"新密码至少 8 位"限制，原代码：
+            # if len(new) < 8:
+            #     self._send_json({"error": "新密码至少 8 位"}, 400)
+            #     return
+            if not new:
+                self._send_json({"error": "新密码不能为空"}, 400)
                 return
             with data_lock:
                 config["password_hash"] = hash_password(new)
