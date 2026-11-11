@@ -22,6 +22,9 @@
     background: var(--bg);
     color: var(--text);
     line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
   header {
     max-width: 1000px;
@@ -72,7 +75,7 @@
   }
   details.card > summary::-webkit-details-marker { display: none; }
   details.card[open] > summary { color: var(--text); }
-  main { max-width: 1000px; margin: 20px auto 60px; padding: 0 20px; }
+  main { flex: 1 0 auto; width: 100%; max-width: 1000px; margin: 20px auto 40px; padding: 0 20px; }
   section.panel { display: none; }
   section.panel.active { display: block; }
   .card {
@@ -204,7 +207,7 @@
     min-width: 120px;
     z-index: 5;
   }
-  footer { max-width: 1000px; margin: 0 auto; padding: 0 20px 30px; color: var(--muted); font-size: 12px; }
+  footer { flex-shrink: 0; width: 100%; max-width: 1000px; margin: 0 auto; padding: 0 20px 30px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
