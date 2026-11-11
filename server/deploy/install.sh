@@ -37,14 +37,23 @@ fi
 
 if [ ! -f .env ]; then
     token=$(python3 -c 'import secrets; print(secrets.token_hex(24))')
+    code=$(python3 -c 'import secrets; print(secrets.token_hex(4))')
     cat > .env <<EOF
 API_TOKEN=$token
+SIGNUP_CODE=$code
 ALLOWED_ORIGINS=https://hlmdf.github.io
 MAX_MB=100
 EOF
     chmod 600 .env
     echo "已生成 API_TOKEN：$token"
-    echo '把这串 token 填到网页顶部“服务器设置”里。'
+    echo "已生成注册码 SIGNUP_CODE：$code"
+    echo '把注册码告诉要用的人；游客不登录也能用，每天有免费次数。'
+fi
+
+if ! grep -q '^SIGNUP_CODE=' .env; then
+    code=$(python3 -c 'import secrets; print(secrets.token_hex(4))')
+    echo "SIGNUP_CODE=$code" >> .env
+    echo "已补上注册码 SIGNUP_CODE：$code"
 fi
 
 id pdftool >/dev/null 2>&1 || useradd --system --home-dir /var/lib/pdf-toolkit --shell /usr/sbin/nologin pdftool

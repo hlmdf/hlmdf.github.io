@@ -12,15 +12,20 @@
 文件只在本机临时目录停留，处理完立即删除，不落盘保存。
 """
 
+import hashlib
+import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
@@ -38,14 +43,220 @@ app.add_middleware(
 )
 
 
+# ---------- 账号、会话与游客额度 ----------
+
+DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).parent / "data")
+USERS_FILE = DATA_DIR / "users.json"
+SESSIONS_FILE = DATA_DIR / "sessions.json"
+USAGE_FILE = DATA_DIR / "usage.json"
+
+FREE_NORMAL = int(os.environ.get("FREE_NORMAL", "100"))
+FREE_HEAVY = int(os.environ.get("FREE_HEAVY", "10"))
+SESSION_DAYS = 30
+SIGNUP_CODE = os.environ.get("SIGNUP_CODE", "")
+
+state_lock = threading.Lock()
+login_hits: dict[str, list[float]] = {}
+
+
+def load_json(path: Path, default):
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+
+def save_json(path: Path, data) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=1)
+    tmp.replace(path)
+
+
+def make_hash(password: str, salt: str | None = None) -> tuple[str, str]:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), 120000
+    ).hex()
+    return salt, digest
+
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def bearer_token(authorization: str | None) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def live_sessions() -> dict:
+    now = time.time()
+    raw = load_json(SESSIONS_FILE, {})
+    return {k: v for k, v in raw.items() if v.get("expires", 0) > now}
+
+
+def issue_session(user: str) -> tuple[str, float]:
+    token = secrets.token_hex(32)
+    expires = time.time() + SESSION_DAYS * 86400
+    with state_lock:
+        data = live_sessions()
+        data[token] = {"user": user, "expires": expires}
+        save_json(SESSIONS_FILE, data)
+    return token, expires
+
+
+def quota_snapshot(ip: str) -> dict:
+    today = time.strftime("%Y-%m-%d")
+    rec = load_json(USAGE_FILE, {}).get(today, {}).get(ip, {})
+    return {
+        "normal_used": int(rec.get("normal", 0)),
+        "normal_limit": FREE_NORMAL,
+        "heavy_used": int(rec.get("heavy", 0)),
+        "heavy_limit": FREE_HEAVY,
+    }
+
+
+def whoami(request: Request, api_token: str | None, authorization: str | None) -> dict:
+    ip = client_ip(request)
+    if API_TOKEN and api_token == API_TOKEN:
+        return {"mode": "owner", "user": None, "ip": ip, "unlimited": True}
+    token = bearer_token(authorization)
+    if token:
+        info = live_sessions().get(token)
+        if info:
+            return {
+                "mode": "user",
+                "user": info["user"],
+                "ip": ip,
+                "unlimited": True,
+                "expires": info["expires"],
+            }
+    return {"mode": "guest", "user": None, "ip": ip, "unlimited": False}
+
+
+def admit(
+    request: Request,
+    api_token: str | None,
+    authorization: str | None,
+    kind: str = "normal",
+) -> dict:
+    ident = whoami(request, api_token, authorization)
+    if ident["unlimited"]:
+        ident["quota"] = None
+        return ident
+    limit = FREE_NORMAL if kind == "normal" else FREE_HEAVY
+    with state_lock:
+        today = time.strftime("%Y-%m-%d")
+        usage = {d: v for d, v in load_json(USAGE_FILE, {}).items() if d == today}
+        rec = usage.setdefault(today, {}).setdefault(ident["ip"], {"normal": 0, "heavy": 0})
+        used = int(rec.get(kind, 0))
+        if used >= limit:
+            label = "普通功能" if kind == "normal" else "OCR、转 Office、PDF/A 这类重任务"
+            raise HTTPException(
+                429, f"游客每天{label} {limit} 次已用完，登录后可无限使用"
+            )
+        rec[kind] = used + 1
+        save_json(USAGE_FILE, usage)
+    ident["quota"] = quota_snapshot(ident["ip"])
+    ident["kind"] = kind
+    return ident
+
+
+def require(kind: str = "normal"):
+    def dependency(
+        request: Request,
+        x_api_token: str | None = Header(None),
+        authorization: str | None = Header(None),
+    ) -> dict:
+        return admit(request, x_api_token, authorization, kind)
+
+    return dependency
+
+
+def throttle(request: Request) -> None:
+    """登录、注册每个 IP 每分钟最多 10 次。"""
+    ip = client_ip(request)
+    now = time.time()
+    with state_lock:
+        hits = [t for t in login_hits.get(ip, []) if now - t < 60]
+        if len(hits) >= 10:
+            raise HTTPException(429, "尝试次数太多，请一分钟后再试")
+        hits.append(now)
+        login_hits[ip] = hits
+
+
+# ---------- 登录 / 注册 ----------
+
+@app.post("/api/auth/register")
+def register(payload: dict, request: Request):
+    throttle(request)
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    code = str(payload.get("code", "")).strip()
+    if SIGNUP_CODE and code != SIGNUP_CODE:
+        raise HTTPException(403, "注册码不对")
+    if not re.fullmatch(r"[\w\u4e00-\u9fa5-]{2,24}", username):
+        raise HTTPException(400, "用户名 2-24 位，可以用字母、数字、下划线、中文")
+    if not password:
+        raise HTTPException(400, "密码不能为空")
+    with state_lock:
+        users = load_json(USERS_FILE, {})
+        if username in users:
+            raise HTTPException(409, "这个用户名已经注册过了")
+        salt, digest = make_hash(password)
+        users[username] = {"salt": salt, "hash": digest, "created": time.time()}
+        save_json(USERS_FILE, users)
+    token, expires = issue_session(username)
+    return {"token": token, "user": username, "expires": expires}
+
+
+@app.post("/api/auth/login")
+def login(payload: dict, request: Request):
+    throttle(request)
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    record = load_json(USERS_FILE, {}).get(username)
+    if not record:
+        raise HTTPException(401, "用户名或密码不对")
+    _, digest = make_hash(password, record.get("salt"))
+    if not secrets.compare_digest(digest, record.get("hash", "")):
+        raise HTTPException(401, "用户名或密码不对")
+    token, expires = issue_session(username)
+    return {"token": token, "user": username, "expires": expires}
+
+
+@app.post("/api/auth/logout")
+def logout(authorization: str | None = Header(None)):
+    token = bearer_token(authorization)
+    if token:
+        with state_lock:
+            data = live_sessions()
+            data.pop(token, None)
+            save_json(SESSIONS_FILE, data)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(
+    request: Request,
+    x_api_token: str | None = Header(None),
+    authorization: str | None = Header(None),
+):
+    ident = whoami(request, x_api_token, authorization)
+    ident["quota"] = quota_snapshot(ident["ip"])
+    ident["limits"] = {"normal": FREE_NORMAL, "heavy": FREE_HEAVY}
+    ident["signup_needs_code"] = bool(SIGNUP_CODE)
+    return ident
+
+
 # ---------- 基础工具 ----------
-
-def check_auth(token: str | None) -> None:
-    if not API_TOKEN:
-        raise HTTPException(500, "服务器未配置 API_TOKEN 环境变量")
-    if token != API_TOKEN:
-        raise HTTPException(401, "API token 无效")
-
 
 def workdir() -> Path:
     return Path(tempfile.mkdtemp(prefix="pdftool-"))
@@ -131,9 +342,8 @@ def health():
 
 @app.post("/api/office-to-pdf")
 async def office_to_pdf(
-    file: UploadFile = File(...), x_api_token: str = Header(None)
+    file: UploadFile = File(...), _access: dict = Depends(require("heavy"))
 ):
-    check_auth(x_api_token)
     work = workdir()
     try:
         src = await save_upload(file, work)
@@ -167,9 +377,8 @@ async def office_to_pdf(
 
 @app.post("/api/pdf-to-word")
 async def pdf_to_word(
-    file: UploadFile = File(...), x_api_token: str = Header(None)
+    file: UploadFile = File(...), _access: dict = Depends(require())
 ):
-    check_auth(x_api_token)
     from docx import Document
 
     work = workdir()
@@ -195,9 +404,8 @@ async def pdf_to_word(
 
 @app.post("/api/pdf-to-excel")
 async def pdf_to_excel(
-    file: UploadFile = File(...), x_api_token: str = Header(None)
+    file: UploadFile = File(...), _access: dict = Depends(require())
 ):
-    check_auth(x_api_token)
     from openpyxl import Workbook
 
     work = workdir()
@@ -229,9 +437,8 @@ async def pdf_to_excel(
 
 @app.post("/api/pdf-to-ppt")
 async def pdf_to_ppt(
-    file: UploadFile = File(...), x_api_token: str = Header(None)
+    file: UploadFile = File(...), _access: dict = Depends(require("heavy"))
 ):
-    check_auth(x_api_token)
     from pptx import Presentation
     from pptx.util import Inches
 
@@ -285,9 +492,8 @@ def _image_size(path: Path) -> tuple[int, int]:
 async def ocr(
     file: UploadFile = File(...),
     lang: str = Form("chi_sim+eng"),
-    x_api_token: str = Header(None),
+    _access: dict = Depends(require("heavy")),
 ):
-    check_auth(x_api_token)
     work = workdir()
     try:
         src = await save_upload(file, work)
@@ -327,9 +533,8 @@ async def ocr(
 async def compress(
     file: UploadFile = File(...),
     preset: str = Form("/ebook"),
-    x_api_token: str = Header(None),
+    _access: dict = Depends(require("heavy")),
 ):
-    check_auth(x_api_token)
     if preset not in {"/screen", "/ebook", "/printer", "/prepress"}:
         raise HTTPException(400, "preset 只能是 /screen、/ebook、/printer、/prepress")
     work = workdir()
@@ -361,9 +566,8 @@ async def compress(
 
 @app.post("/api/repair")
 async def repair(
-    file: UploadFile = File(...), x_api_token: str = Header(None)
+    file: UploadFile = File(...), _access: dict = Depends(require())
 ):
-    check_auth(x_api_token)
     work = workdir()
     try:
         src = await save_upload(file, work)
@@ -382,9 +586,8 @@ async def repair(
 async def protect(
     file: UploadFile = File(...),
     password: str = Form(...),
-    x_api_token: str = Header(None),
+    _access: dict = Depends(require()),
 ):
-    check_auth(x_api_token)
     if len(password) < 4:
         raise HTTPException(400, "密码至少 4 位")
     work = workdir()
@@ -413,9 +616,8 @@ async def protect(
 async def unlock(
     file: UploadFile = File(...),
     password: str = Form(""),
-    x_api_token: str = Header(None),
+    _access: dict = Depends(require()),
 ):
-    check_auth(x_api_token)
     work = workdir()
     try:
         src = await save_upload(file, work)
@@ -433,9 +635,8 @@ async def unlock(
 async def compare(
     file: UploadFile = File(...),
     other: UploadFile = File(...),
-    x_api_token: str = Header(None),
+    _access: dict = Depends(require()),
 ):
-    check_auth(x_api_token)
     import difflib
 
     work = workdir()
@@ -469,9 +670,8 @@ async def compare(
 async def redact(
     file: UploadFile = File(...),
     boxes: str = Form("{}"),
-    x_api_token: str = Header(None),
+    _access: dict = Depends(require()),
 ):
-    check_auth(x_api_token)
     import json as _json
 
     import fitz  # 旧版本 PyMuPDF 的模块名；新版本推荐 pymupdf
@@ -512,8 +712,7 @@ async def redact(
 # ---------- PDF/A 归档格式 ----------
 
 @app.post("/api/pdfa")
-async def pdfa(file: UploadFile = File(...), x_api_token: str = Header(None)):
-    check_auth(x_api_token)
+async def pdfa(file: UploadFile = File(...), _access: dict = Depends(require("heavy"))):
     import glob as _glob
 
     work = workdir()
@@ -558,8 +757,7 @@ async def pdfa(file: UploadFile = File(...), x_api_token: str = Header(None)):
 # ---------- 网址转 PDF ----------
 
 @app.post("/api/url-to-pdf")
-def url_to_pdf(url: str = Form(...), x_api_token: str = Header(None)):
-    check_auth(x_api_token)
+def url_to_pdf(url: str = Form(...), _access: dict = Depends(require("heavy"))):
     url = (url or "").strip()
     if not re.match(r"^https?://\S+$", url):
         raise HTTPException(400, "只支持 http/https 网址")

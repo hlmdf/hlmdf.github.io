@@ -9,6 +9,7 @@ Group=pdftool
 WorkingDirectory=/opt/pdf-toolkit
 EnvironmentFile=/opt/pdf-toolkit/.env
 Environment=HOME=/var/lib/pdf-toolkit
+Environment=DATA_DIR=/var/lib/pdf-toolkit
 ExecStart=/opt/pdf-toolkit/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8013
 Restart=always
 RestartSec=3

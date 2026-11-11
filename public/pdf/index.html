@@ -243,14 +243,27 @@
 
 <main>
   <details class="card" id="apiCard">
-    <summary>服务器设置（使用右侧“服务器”功能前填写）</summary>
+    <summary>账户与服务器（游客可直接用，登录后不限次数）</summary>
     <div class="row mt">
       <label class="field">API 地址 <input type="text" id="apiBase" placeholder="https://47.103.222.155:5013" style="width:260px"></label>
-      <label class="field">Token <input type="text" id="apiToken" placeholder="部署时设置的 API_TOKEN" style="width:200px"></label>
       <button class="btn ghost small" id="apiCheck">检测连接</button>
       <span class="hint" id="apiStatus" style="margin:0"></span>
     </div>
-    <p class="hint">配置只保存在本机浏览器（localStorage）。API 地址填服务器地址即可，例如 <code>https://47.103.222.155:5013</code>，结尾的 <code>/api</code> 会自动补上。</p>
+    <div class="row mt">
+      <span class="hint" id="quotaText" style="margin:0">正在读取额度…</span>
+    </div>
+    <div class="row mt" id="loginRow">
+      <label class="field">用户名 <input type="text" id="authUser" autocomplete="username" style="width:150px"></label>
+      <label class="field">密码 <input type="password" id="authPass" autocomplete="current-password" style="width:150px"></label>
+      <label class="field" id="codeField">注册码 <input type="text" id="authCode" style="width:120px"></label>
+      <button class="btn small" id="loginBtn">登录</button>
+      <button class="btn ghost small" id="registerBtn">注册</button>
+    </div>
+    <div class="row mt" id="meRow" style="display:none">
+      <span class="hint" id="meText" style="margin:0"></span>
+      <button class="btn ghost small" id="logoutBtn">退出登录</button>
+    </div>
+    <p class="hint">游客每天可用普通功能 <b id="limitNormal">100</b> 次、重任务 <b id="limitHeavy">10</b> 次；登录后不限次数。账号只保存在本机浏览器，换设备需要重新登录。</p>
   </details>
 
   <!-- 合并 -->
@@ -857,23 +870,32 @@ async function makeOverlayPng(doc, vw, vh, draw) {
   return doc.embedPng(await blob.arrayBuffer());
 }
 
-// ---------- 服务器设置 ----------
+// ---------- 账户与服务器 ----------
 const API_KEY = 'pdftool.api';
+const DEFAULT_API = 'https://47.103.222.155:5013';
+
+let sessionToken = '';
+let currentUser = '';
 
 function apiUrl(path) {
-  const raw = ($('apiBase').value.trim() || '/api').replace(/\/+$/, '');
+  const raw = ($('apiBase').value.trim() || DEFAULT_API).replace(/\/+$/, '');
   // 允许只填 https://host:5013，自动补上 /api
   const base = /\/api$/.test(raw) ? raw : raw + '/api';
   return base + path;
 }
 
+function authHeaders() {
+  return sessionToken ? { Authorization: 'Bearer ' + sessionToken } : {};
+}
+
 function loadApiSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(API_KEY) || '{}');
-    $('apiBase').value = s.base || '/api';
-    $('apiToken').value = s.token || '';
+    $('apiBase').value = s.base || DEFAULT_API;
+    sessionToken = s.session || '';
+    currentUser = s.user || '';
   } catch (_) {
-    $('apiBase').value = '/api';
+    $('apiBase').value = DEFAULT_API;
   }
 }
 
@@ -881,23 +903,75 @@ function saveApiSettings() {
   try {
     localStorage.setItem(API_KEY, JSON.stringify({
       base: $('apiBase').value.trim(),
-      token: $('apiToken').value.trim(),
+      session: sessionToken,
+      user: currentUser,
     }));
   } catch (_) { /* 隐私模式下可能不可写 */ }
 }
 
-loadApiSettings();
-$('apiBase').addEventListener('input', saveApiSettings);
-$('apiToken').addEventListener('input', saveApiSettings);
+async function apiJson(path, body, method = 'POST') {
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      method,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: body === null || body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (e) {
+    throw new Error('连不上服务器：' + (e.message || e));
+  }
+  let j = {};
+  try { j = await res.json(); } catch (_) { /* 空响应 */ }
+  if (!res.ok) throw new Error(j.error || `服务器返回 ${res.status}`);
+  return j;
+}
+
+async function refreshMe() {
+  const line = $('quotaText');
+  try {
+    const me = await apiJson('/auth/me', null, 'GET');
+    if (me.limits) {
+      $('limitNormal').textContent = me.limits.normal;
+      $('limitHeavy').textContent = me.limits.heavy;
+    }
+    $('codeField').style.display = me.signup_needs_code ? '' : 'none';
+    if (me.unlimited) {
+      $('loginRow').style.display = 'none';
+      $('meRow').style.display = '';
+      $('meText').textContent = me.mode === 'owner'
+        ? '主人令牌 · 不限次数'
+        : `已登录：${me.user} · 不限次数`;
+      line.textContent = '';
+    } else {
+      $('loginRow').style.display = '';
+      $('meRow').style.display = 'none';
+      const q = me.quota || {};
+      const left = (limit, used) => Math.max(0, (limit || 0) - (used || 0));
+      line.textContent = `游客模式 · 今天还剩普通功能 ${left(q.normal_limit, q.normal_used)} 次、重任务 ${left(q.heavy_limit, q.heavy_used)} 次`;
+    }
+  } catch (e) {
+    line.textContent = '连不上服务器：' + (e.message || e);
+  }
+}
+
+async function doAuth(path, extra) {
+  const username = $('authUser').value.trim();
+  const password = $('authPass').value;
+  if (!username || !password) throw new Error('请填写用户名和密码');
+  const j = await apiJson(path, Object.assign({ username, password }, extra || {}));
+  sessionToken = j.token;
+  currentUser = j.user;
+  saveApiSettings();
+  await refreshMe();
+  return j;
+}
 
 async function apiFetch(path, formData) {
-  const token = $('apiToken').value.trim();
-  if (!token) throw new Error('请先展开“服务器设置”，填写 API 地址和 Token');
   let res;
   try {
     res = await fetch(apiUrl(path), {
       method: 'POST',
-      headers: { 'X-API-Token': token },
+      headers: authHeaders(),
       body: formData,
     });
   } catch (e) {
@@ -919,6 +993,45 @@ async function apiFetch(path, formData) {
   };
 }
 
+loadApiSettings();
+$('apiBase').addEventListener('input', saveApiSettings);
+
+$('loginBtn').onclick = async () => {
+  const el = $('apiStatus');
+  el.style.color = 'var(--muted)';
+  el.textContent = '登录中…';
+  try {
+    const j = await doAuth('/auth/login');
+    el.style.color = '#2e7d32';
+    el.textContent = `已登录：${j.user}`;
+  } catch (e) {
+    el.style.color = 'var(--danger)';
+    el.textContent = e.message || String(e);
+  }
+};
+
+$('registerBtn').onclick = async () => {
+  const el = $('apiStatus');
+  el.style.color = 'var(--muted)';
+  el.textContent = '注册中…';
+  try {
+    const j = await doAuth('/auth/register', { code: $('authCode').value.trim() });
+    el.style.color = '#2e7d32';
+    el.textContent = `注册成功，已登录：${j.user}`;
+  } catch (e) {
+    el.style.color = 'var(--danger)';
+    el.textContent = e.message || String(e);
+  }
+};
+
+$('logoutBtn').onclick = async () => {
+  try { await apiJson('/auth/logout'); } catch (_) { /* 已失效也无所谓 */ }
+  sessionToken = '';
+  currentUser = '';
+  saveApiSettings();
+  await refreshMe();
+};
+
 $('apiCheck').onclick = async () => {
   const el = $('apiStatus');
   el.style.color = 'var(--muted)';
@@ -931,18 +1044,18 @@ $('apiCheck').onclick = async () => {
     if (missing.length) {
       el.style.color = '#9a6a00';
       el.textContent = `服务在线，但缺少：${missing.join('、')}`;
-    } else if (!j.auth_configured) {
-      el.style.color = 'var(--danger)';
-      el.textContent = '服务在线，但服务器没设置 API_TOKEN';
     } else {
       el.style.color = '#2e7d32';
       el.textContent = `连接正常，单文件上限 ${j.max_mb} MB`;
     }
+    await refreshMe();
   } catch (e) {
     el.style.color = 'var(--danger)';
     el.textContent = '连接失败：' + (e.message || e);
   }
 };
+
+refreshMe();
 
 // ---------- 标签切换 ----------
 document.querySelectorAll('#tabs button').forEach((btn) => {
