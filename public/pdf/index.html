@@ -245,12 +245,8 @@
   <details class="card" id="apiCard">
     <summary>账户与服务器（游客可直接用，登录后不限次数）</summary>
     <div class="row mt">
-      <label class="field">API 地址 <input type="text" id="apiBase" placeholder="https://47.103.222.155:5013" style="width:260px"></label>
-      <button class="btn ghost small" id="apiCheck">检测连接</button>
+      <span class="hint" id="quotaText" style="margin:0">正在连接服务器…</span>
       <span class="hint" id="apiStatus" style="margin:0"></span>
-    </div>
-    <div class="row mt">
-      <span class="hint" id="quotaText" style="margin:0">正在读取额度…</span>
     </div>
     <div class="row mt" id="loginRow">
       <label class="field">用户名 <input type="text" id="authUser" autocomplete="username" style="width:150px"></label>
@@ -878,10 +874,7 @@ let sessionToken = '';
 let currentUser = '';
 
 function apiUrl(path) {
-  const raw = ($('apiBase').value.trim() || DEFAULT_API).replace(/\/+$/, '');
-  // 允许只填 https://host:5013，自动补上 /api
-  const base = /\/api$/.test(raw) ? raw : raw + '/api';
-  return base + path;
+  return DEFAULT_API + '/api' + path;
 }
 
 function authHeaders() {
@@ -891,18 +884,14 @@ function authHeaders() {
 function loadApiSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(API_KEY) || '{}');
-    $('apiBase').value = s.base || DEFAULT_API;
     sessionToken = s.session || '';
     currentUser = s.user || '';
-  } catch (_) {
-    $('apiBase').value = DEFAULT_API;
-  }
+  } catch (_) { /* 存储损坏时按游客处理 */ }
 }
 
 function saveApiSettings() {
   try {
     localStorage.setItem(API_KEY, JSON.stringify({
-      base: $('apiBase').value.trim(),
       session: sessionToken,
       user: currentUser,
     }));
@@ -994,7 +983,6 @@ async function apiFetch(path, formData) {
 }
 
 loadApiSettings();
-$('apiBase').addEventListener('input', saveApiSettings);
 
 $('loginBtn').onclick = async () => {
   const el = $('apiStatus');
@@ -1030,29 +1018,6 @@ $('logoutBtn').onclick = async () => {
   currentUser = '';
   saveApiSettings();
   await refreshMe();
-};
-
-$('apiCheck').onclick = async () => {
-  const el = $('apiStatus');
-  el.style.color = 'var(--muted)';
-  el.textContent = '检测中…';
-  try {
-    const res = await fetch(apiUrl('/health'));
-    if (!res.ok) throw new Error(`服务器返回 ${res.status}，请检查 API 地址`);
-    const j = await res.json();
-    const missing = Object.entries(j.tools || {}).filter(([, ok]) => !ok).map(([k]) => k);
-    if (missing.length) {
-      el.style.color = '#9a6a00';
-      el.textContent = `服务在线，但缺少：${missing.join('、')}`;
-    } else {
-      el.style.color = '#2e7d32';
-      el.textContent = `连接正常，单文件上限 ${j.max_mb} MB`;
-    }
-    await refreshMe();
-  } catch (e) {
-    el.style.color = 'var(--danger)';
-    el.textContent = '连接失败：' + (e.message || e);
-  }
 };
 
 refreshMe();
