@@ -400,6 +400,11 @@ export const profile = {
       name: { zh: "飞机雷达", en: "Flight radar" },
       href: "/air-radar/",
     },
+    // 【2026-11-11 新增】PDF 工具箱（独立的静态页 public/pdf/index.html，浏览器本地处理，文件不上传）
+    {
+      name: { zh: "PDF 工具箱", en: "PDF toolkit" },
+      href: "/pdf/",
+    },
   ] as PersonalTool[],
   sites: [
     {
