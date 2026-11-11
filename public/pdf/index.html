@@ -242,12 +242,12 @@
   <details class="card" id="apiCard">
     <summary>服务器设置（使用右侧“服务器”功能前填写）</summary>
     <div class="row mt">
-      <label class="field">API 地址 <input type="text" id="apiBase" placeholder="/api" style="width:260px"></label>
+      <label class="field">API 地址 <input type="text" id="apiBase" placeholder="https://47.103.222.155:5013" style="width:260px"></label>
       <label class="field">Token <input type="text" id="apiToken" placeholder="部署时设置的 API_TOKEN" style="width:200px"></label>
       <button class="btn ghost small" id="apiCheck">检测连接</button>
       <span class="hint" id="apiStatus" style="margin:0"></span>
     </div>
-    <p class="hint">配置只保存在本机浏览器（localStorage）。API 地址填 Nginx 反代后的路径，例如 <code>https://你的域名/api</code>。</p>
+    <p class="hint">配置只保存在本机浏览器（localStorage）。API 地址填服务器地址即可，例如 <code>https://47.103.222.155:5013</code>，结尾的 <code>/api</code> 会自动补上。</p>
   </details>
 
   <!-- 合并 -->
@@ -858,7 +858,9 @@ async function makeOverlayPng(doc, vw, vh, draw) {
 const API_KEY = 'pdftool.api';
 
 function apiUrl(path) {
-  const base = ($('apiBase').value.trim() || '/api').replace(/\/+$/, '');
+  const raw = ($('apiBase').value.trim() || '/api').replace(/\/+$/, '');
+  // 允许只填 https://host:5013，自动补上 /api
+  const base = /\/api$/.test(raw) ? raw : raw + '/api';
   return base + path;
 }
 
@@ -920,6 +922,7 @@ $('apiCheck').onclick = async () => {
   el.textContent = '检测中…';
   try {
     const res = await fetch(apiUrl('/health'));
+    if (!res.ok) throw new Error(`服务器返回 ${res.status}，请检查 API 地址`);
     const j = await res.json();
     const missing = Object.entries(j.tools || {}).filter(([, ok]) => !ok).map(([k]) => k);
     if (missing.length) {

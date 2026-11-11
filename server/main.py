@@ -8,7 +8,7 @@
   - 保留文字的强力压缩               -> Ghostscript
   - 修复损坏 PDF / 加密 / 解密       -> qpdf
 
-所有依赖都是容器内的命令行工具或 Python 包，见 Dockerfile。
+所有依赖都是系统命令行工具或 Python 包，见 deploy/install.sh。
 文件只在本机临时目录停留，处理完立即删除，不落盘保存。
 """
 
@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -69,6 +70,18 @@ async def save_upload(file: UploadFile, directory: Path) -> Path:
     return target
 
 
+def tool(name: str) -> str:
+    """优先用虚拟环境里的可执行文件。
+
+    systemd 启动时 PATH 只有 /usr/bin 一类目录，不含 .venv/bin，
+    ocrmypdf 这类 pip 安装的命令会因此找不到。
+    """
+    local = Path(sys.executable).parent / name
+    if local.exists():
+        return str(local)
+    return shutil.which(name) or name
+
+
 def run(cmd: list[str], timeout: int = 300) -> str:
     try:
         proc = subprocess.run(
@@ -105,7 +118,7 @@ def health():
         "ocrmypdf": "OCRmyPDF",
         "tesseract": "Tesseract",
     }
-    status = {name: bool(shutil.which(bin)) for bin, name in tools.items()}
+    status = {name: bool(shutil.which(tool(bin))) for bin, name in tools.items()}
     return {
         "ok": all(status.values()),
         "tools": status,
@@ -289,7 +302,7 @@ async def ocr(
         out = work / (src.stem + "_ocr.pdf")
         run(
             [
-                "ocrmypdf",
+                tool("ocrmypdf"),
                 "--language",
                 lang,
                 "--skip-text",
